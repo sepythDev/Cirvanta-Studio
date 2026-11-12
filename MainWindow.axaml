@@ -1,0 +1,291 @@
+<Window x:Class="CircuitForge.MainWindow"
+ xmlns="https://github.com/avaloniaui"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="Cirvanta Studio" Height="740" Width="1260" MinHeight="540" MinWidth="900"
+ Icon="/Assets/cirvanta.ico"
+ Background="#F3F6FA" Foreground="#172033" FontSize="12"
+ WindowStartupLocation="CenterScreen">
+ <Window.Styles>
+  <!-- WPF default control font is 12px; Fluent defaults to 14px. -->
+  <Style Selector="Button">
+   <Setter Property="FontSize" Value="12"/>
+   <Setter Property="Cursor" Value="Hand"/>
+  </Style>
+  <Style Selector="Button.cat">
+   <Setter Property="Margin" Value="2"/>
+   <Setter Property="Padding" Value="5"/>
+   <Setter Property="Width" Value="34"/>
+   <Setter Property="Height" Value="32"/>
+   <Setter Property="Background" Value="#F8FAFC"/>
+   <Setter Property="BorderBrush" Value="#CBD5E1"/>
+   <Setter Property="BorderThickness" Value="1"/>
+   <Setter Property="Cursor" Value="Hand"/>
+  </Style>
+  <Style Selector="Button.cat.selected">
+   <Setter Property="Background" Value="#EFF6FF"/>
+   <Setter Property="BorderBrush" Value="#2563EB"/>
+   <Setter Property="BorderThickness" Value="1,1,1,2"/>
+  </Style>
+
+<!-- Запуск: обычное состояние, наведение и нажатие -->
+<Style Selector="Button.runButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#2563EB"/>
+    <Setter Property="Foreground" Value="White"/>
+    <Setter Property="BorderBrush" Value="#2563EB"/>
+</Style>
+
+<Style Selector="Button.runButton:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#2563EB"/>
+    <Setter Property="Foreground" Value="White"/>
+    <Setter Property="BorderBrush" Value="#2563EB"/>
+</Style>
+
+<!-- Стоп: обычное состояние, наведение и нажатие -->
+<Style Selector="Button.stopButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#DC2626"/>
+    <Setter Property="Foreground" Value="White"/>
+    <Setter Property="BorderBrush" Value="#DC2626"/>
+</Style>
+
+<Style Selector="Button.stopButton:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#DC2626"/>
+    <Setter Property="Foreground" Value="White"/>
+    <Setter Property="BorderBrush" Value="#DC2626"/>
+</Style>
+
+
+ </Window.Styles>
+ <Grid>
+  <Grid.RowDefinitions>
+   <RowDefinition Height="37"/>
+   <RowDefinition Height="Auto"/>
+   <RowDefinition Height="*"/>
+   <RowDefinition Height="26"/>
+  </Grid.RowDefinitions>
+
+  <Border x:Name="TopBar" Grid.Row="0" Background="White" BorderBrush="#D9E1EC" BorderThickness="0,0,0,1">
+  
+<DockPanel Margin="8,0"
+           HorizontalAlignment="Stretch"
+           LastChildFill="False">
+
+    <!-- Левая часть верхней панели -->
+    <StackPanel Orientation="Horizontal"
+                VerticalAlignment="Center"
+                DockPanel.Dock="Left"
+                Spacing="2">
+
+        <Button x:Name="FileMenuButton"
+                Content="Файл"
+                Click="FileMenu_Click"
+                Padding="9.24,2.64"
+                FontSize="13.2"
+                Background="Transparent"
+                BorderBrush="Transparent"
+                BorderThickness="0"/>
+
+        
+
+    </StackPanel>
+
+    <!-- Правая часть верхней панели -->
+    <StackPanel Orientation="Horizontal"
+                VerticalAlignment="Center"
+                DockPanel.Dock="Right"
+                Spacing="4">
+
+<Button x:Name="ThemeToggleButton"
+                Click="ThemeToggle_Click"
+                Width="30"
+                Height="28"
+                Padding="0"
+                Background="#FFFFFF"
+                BorderBrush="#DCE4EF"
+                BorderThickness="1"
+                CornerRadius="5"
+                ToolTip.Tip="Cambiar tema">
+            <TextBlock x:Name="ThemeIconText"
+                       Text="☾"
+                       FontFamily="Segoe UI Symbol"
+                       FontSize="18"
+                       Foreground="#64748B"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"/>
+        </Button>
+
+        <Button x:Name="LanguageButton"
+                Width="30"
+                Height="28"
+                Margin="5,0,0,0"
+                Padding="0"
+                Background="#FFFFFF"
+                BorderBrush="#DCE4EF"
+                BorderThickness="1"
+                CornerRadius="5"
+                FontSize="10"
+                FontWeight="SemiBold"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                Content="ES"
+                ToolTip.Tip="Idioma">
+            <Button.Flyout>
+                <MenuFlyout>
+                    <MenuItem Header="RU" Click="LanguageRu_Click"/>
+                    <MenuItem Header="EN" Click="LanguageEn_Click"/>
+                    <MenuItem Header="ES" Click="LanguageEs_Click"/>
+                </MenuFlyout>
+            </Button.Flyout>
+        </Button>
+
+<Button x:Name="RunButton"
+        Classes="runButton"
+        Content="▶ Запуск"
+        Click="Run_Click"
+        Cursor="Hand"
+        Padding="10,5"
+        Background="#2563EB"
+        Foreground="White"
+        BorderBrush="#2563EB"
+        BorderThickness="1"
+        CornerRadius="5">
+</Button>
+
+
+<Button x:Name="StopButton"
+        Classes="stopButton"
+        Content="■ Стоп"
+        Click="Stop_Click"
+        Cursor="Hand"
+        Padding="10,5"
+        Background="#DC2626"
+        Foreground="White"
+        BorderBrush="#DC2626"
+        BorderThickness="1"
+        CornerRadius="5">
+</Button>
+
+
+    </StackPanel>
+
+</DockPanel>
+
+  </Border>
+
+  <Border x:Name="ToolboxBorder" Grid.Row="1" VerticalAlignment="Bottom" Background="White" BorderBrush="#D9E1EC" BorderThickness="0,0,0,1" Padding="9,2,9,6">
+   <Grid>
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <WrapPanel x:Name="CategoryPanel" Grid.Row="1" Margin="0,0,0,5" VerticalAlignment="Center">
+     <!-- 1. Электропитание -->
+     <Button Classes="cat" Click="CategoryPower_Click" ToolTip.Tip="Электропитание" ToolTip.ShowDelay="350">
+      <Path Width="22" Height="22" Data="M 14,0 L 5,12 L 11,12 L 8,22 L 19,8 L 13,8 Z" Fill="Black" Stretch="Uniform">
+       <Path.RenderTransform>
+        <TranslateTransform X="3"/>
+       </Path.RenderTransform>
+      </Path>
+     </Button>
+     <!-- 2. Автоматы -->
+     <Button Classes="cat" Click="CategoryBreakers_Click" ToolTip.Tip="Автоматы" ToolTip.ShowDelay="350">
+      <Canvas Width="22" Height="22">
+       <Rectangle Canvas.Left="5" Canvas.Top="0" Width="12" Height="22" RadiusX="2.5" RadiusY="2.5" Fill="White" Stroke="Black" StrokeThickness="1.2"/>
+       <Ellipse Canvas.Left="9" Canvas.Top="2" Width="4" Height="4" Fill="White" Stroke="Black" StrokeThickness="1.0"/>
+       <Ellipse Canvas.Left="10.2" Canvas.Top="3.2" Width="1.6" Height="1.6" Fill="Black"/>
+       <Rectangle Canvas.Left="2" Canvas.Top="5.5" Width="18" Height="12" RadiusX="2" RadiusY="2" Fill="White" Stroke="Black" StrokeThickness="1.2"/>
+       <Rectangle Canvas.Left="5" Canvas.Top="9.5" Width="12" Height="7" RadiusX="1.6" RadiusY="1.6" Fill="Black"/>
+       <Rectangle Canvas.Left="7" Canvas.Top="10.8" Width="8" Height="5" Fill="White" Stroke="Black" StrokeThickness="0.8"/>
+       <Line StartPoint="8.4,14.5" EndPoint="13.6,14.5" Stroke="Black" StrokeThickness="0.8" StrokeLineCap="Round"/>
+       <Ellipse Canvas.Left="9" Canvas.Top="18" Width="4" Height="4" Fill="White" Stroke="Black" StrokeThickness="1.0"/>
+       <Ellipse Canvas.Left="10.2" Canvas.Top="19.2" Width="1.6" Height="1.6" Fill="Black"/>
+      </Canvas>
+     </Button>
+     <!-- 3. Контакторы и переключатели -->
+     <Button Classes="cat" Click="CategoryContactors_Click" ToolTip.Tip="Контакторы и переключатели" ToolTip.ShowDelay="350">
+      <Canvas Width="22" Height="22">
+       <Line StartPoint="0,11" EndPoint="5,11" Stroke="Black" StrokeThickness="1.4"/>
+       <Ellipse Canvas.Left="5" Canvas.Top="9" Width="4" Height="4" Fill="Black"/>
+       <Ellipse Canvas.Left="16" Canvas.Top="9" Width="4" Height="4" Fill="Black"/>
+       <Line StartPoint="7,10" EndPoint="20,2" Stroke="Black" StrokeThickness="1.4"/>
+       <Line StartPoint="18,11" EndPoint="23,11" Stroke="Black" StrokeThickness="1.4"/>
+      </Canvas>
+     </Button>
+     <!-- 4. Моторы -->
+     <Button Classes="cat" Click="CategoryMotors_Click" ToolTip.Tip="Моторы" ToolTip.ShowDelay="350">
+      <Canvas Width="22" Height="22">
+       <Ellipse Canvas.Left="2" Canvas.Top="2" Width="18" Height="18" Stroke="Black" StrokeThickness="1.7"/>
+       <TextBlock Canvas.Left="5.3" Canvas.Top="3" Width="10" Height="16" Text="M" Foreground="Black" FontSize="11" FontWeight="SemiBold" TextAlignment="Center" VerticalAlignment="Center"/>
+      </Canvas>
+     </Button>
+     <!-- 7. Кнопки -->
+     <Button Classes="cat" Click="CategoryButtons_Click" ToolTip.Tip="Кнопки" ToolTip.ShowDelay="350">
+      <Canvas Width="22" Height="22" RenderTransformOrigin="50%,50%">
+       <Canvas.RenderTransform>
+        <ScaleTransform ScaleX="1.08" ScaleY="1.08"/>
+       </Canvas.RenderTransform>
+       <Line StartPoint="11,0.5" EndPoint="11,6" Stroke="Black" StrokeThickness="1.4"/>
+       <Line StartPoint="7,3" EndPoint="11,7" Stroke="Black" StrokeThickness="1.4"/>
+       <Line StartPoint="11,7" EndPoint="15,3" Stroke="Black" StrokeThickness="1.4"/>
+       <Line StartPoint="4,8.5" EndPoint="18,8.5" Stroke="Black" StrokeThickness="1.4"/>
+       <Line StartPoint="6,12" EndPoint="10,12" Stroke="Black" StrokeThickness="1.4"/>
+       <Line StartPoint="12,12" EndPoint="16,12" Stroke="Black" StrokeThickness="1.4"/>
+       <Line StartPoint="6,12" EndPoint="6,18" Stroke="Black" StrokeThickness="1.4"/>
+       <Line StartPoint="16,12" EndPoint="16,18" Stroke="Black" StrokeThickness="1.4"/>
+       <Ellipse Canvas.Left="4" Canvas.Top="17" Width="4" Height="4" Stroke="Black" StrokeThickness="1.4" Fill="White"/>
+       <Ellipse Canvas.Left="14" Canvas.Top="17" Width="4" Height="4" Stroke="Black" StrokeThickness="1.4" Fill="White"/>
+       <Ellipse Canvas.Left="5.3" Canvas.Top="18.3" Width="1.4" Height="1.4" Fill="White"/>
+       <Ellipse Canvas.Left="15.3" Canvas.Top="18.3" Width="1.4" Height="1.4" Fill="White"/>
+      </Canvas>
+     </Button>
+     <!-- 9. Катушки -->
+     <Button Classes="cat" Click="CategoryCoils_Click" ToolTip.Tip="Катушки" ToolTip.ShowDelay="350">
+      <Canvas Width="22" Height="22" RenderTransformOrigin="50%,50%">
+       <Canvas.RenderTransform>
+        <ScaleTransform ScaleX="1.08" ScaleY="1.08"/>
+       </Canvas.RenderTransform>
+       <Line StartPoint="11,0.5" EndPoint="11,6" Stroke="Black" StrokeThickness="1.7"/>
+       <Rectangle Canvas.Left="5" Canvas.Top="6" Width="12" Height="7" Stroke="Black" StrokeThickness="1.7" Fill="Transparent"/>
+       <Line StartPoint="11,13" EndPoint="11,19" Stroke="Black" StrokeThickness="1.7"/>
+      </Canvas>
+     </Button>
+    </WrapPanel>
+    <Grid x:Name="PaletteRow" Grid.Row="2" IsVisible="False">
+     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="1"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+     <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" MaxHeight="94">
+      <WrapPanel x:Name="PalettePanel"/>
+     </ScrollViewer>
+     <Border Grid.Column="1" Background="#D9E1EC" Margin="7,2"/>
+     <!-- <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="7,0,0,0">
+      <Button x:Name="RotateButton" Content="↻ Поворот" Click="RotateSelected_Click" Padding="9,8" Margin="2,0" ToolTip.Tip="Повернуть выбранный элемент на 90° (R)"/>
+      <Button x:Name="RunButton" Content="▶ Запуск" Click="Run_Click" Padding="10,8" Margin="2,0" Background="#2563EB" Foreground="White"/>
+      <Button x:Name="StopButton" Content="■ Стоп" Click="Stop_Click" Padding="10,8" Margin="2,0" IsEnabled="False"/>
+     </StackPanel> -->
+    </Grid>
+   </Grid>
+  </Border>
+
+  <Border Grid.Row="2" Margin="10" BorderBrush="#D6DEE9" BorderThickness="1" CornerRadius="7" Background="White" ClipToBounds="True">
+   <Grid x:Name="Viewport" Background="White" ClipToBounds="True">
+    <Canvas>
+     <Canvas x:Name="SchematicCanvas" Canvas.Left="0" Canvas.Top="0" Width="3000" Height="2000" Background="White"
+       Focusable="True"
+       PointerPressed="Canvas_PointerPressed"
+       PointerMoved="Canvas_PointerMoved"
+       PointerReleased="Canvas_PointerReleased"
+       PointerExited="Canvas_PointerExited"
+       KeyDown="Canvas_KeyDown"/>
+    </Canvas>
+    <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="12" Padding="8,5" CornerRadius="4" Background="#F1F5F9" IsHitTestVisible="False">
+     <TextBlock x:Name="WorkAreaLabel" Text="РАБОЧЕЕ ПОЛЕ" FontSize="10" Foreground="#64748B"/>
+    </Border>
+    <!-- <Border VerticalAlignment="Bottom" HorizontalAlignment="Left" Margin="12" Padding="8,5" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="1" IsHitTestVisible="False">
+     <TextBlock Text="Провод: клемма → клемма · R — поворот · Backspace — удалить · Esc — отменить" FontSize="9" Foreground="#64748B"/>
+    </Border> -->
+   </Grid>
+  </Border>
+
+  <Border Grid.Row="3" Background="White" BorderBrush="#D9E1EC" BorderThickness="0,1,0,0" Padding="10,3">
+   <DockPanel>
+    <TextBlock x:Name="StatusText" Text="Готово. Выбери компонент в панели сверху." Foreground="#64748B" FontSize="10"/>
+    <TextBlock DockPanel.Dock="Right" Text="MVP 0.5.0" Foreground="#94A3B8" FontSize="10"/>
+   </DockPanel>
+  </Border>
+ </Grid>
+</Window>
