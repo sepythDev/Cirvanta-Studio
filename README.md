@@ -34,9 +34,30 @@ A modern electrical schematic editor and real-time circuit simulator built with 
 
 ---
 
-## Download
+## Download & Installation
 
-Go to the [**Releases**](https://github.com/sepythDev/Cirvanta-Studio/releases) page and download the standalone **`Cirvanta.zip`** for Windows x64 (no .NET installation required).
+Go to the [**Releases**](https://github.com/sepythDev/Cirvanta-Studio/releases) page and download the build for your operating system (all builds are standalone — no .NET installation required).
+
+### Windows (x64)
+1. Download **`Cirvanta.zip`** (unpack it).
+2. Double-click **`Cirvanta.exe`** to launch.
+   > *Note: If Windows SmartScreen shows a warning ("Windows protected your PC"), click **More info** → **Run anyway** (the binary is unsigned).*
+
+### Linux (x64)
+1. Download the **Linux** release file (and extract it if archived).
+2. Open a terminal in the folder containing `Cirvanta`, grant execute permission, and run it:
+   ```bash
+   chmod +x ./Cirvanta
+   ./Cirvanta
+   
+### macOS (Apple Silicon & Intel)
+
+1. Download osx-arm64 (for M1/M2/M3/M4 Macs) or osx-x64 (for Intel Macs) and extract it if archived.
+
+2. Since the app is not notarized with a paid Apple Developer certificate, macOS Gatekeeper may block the first launch. Open Terminal in the folder containing Cirvanta and run:
+chmod +x ./Cirvanta
+xattr -d com.apple.quarantine ./Cirvanta
+./Cirvanta
 
 ---
 
