@@ -55,6 +55,7 @@ Go to the [**Releases**](https://github.com/sepythDev/Cirvanta-Studio/releases) 
 1. Download osx-arm64 (for M1/M2/M3/M4 Macs) or osx-x64 (for Intel Macs) and extract it if archived.
 
 2. Since the app is not notarized with a paid Apple Developer certificate, macOS Gatekeeper may block the first launch. Open Terminal in the folder containing Cirvanta and run:
+```bash
 chmod +x ./Cirvanta
 xattr -d com.apple.quarantine ./Cirvanta
 ./Cirvanta
