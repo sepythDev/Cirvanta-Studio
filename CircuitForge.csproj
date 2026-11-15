@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CircuitForge</RootNamespace>
+    <ApplicationIcon>Assets\cirvanta.ico</ApplicationIcon>
+    <AssemblyName>Cirvanta</AssemblyName>
+    <Product>Cirvanta Studio</Product>
+    <Title>Cirvanta Studio</Title>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Keep the WPF implementation isolated in its own project. -->
+    <Compile Remove="Wpf\**\*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Put power-lightning.png here (same file as in the WPF project's Assets folder). -->
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+</Project>

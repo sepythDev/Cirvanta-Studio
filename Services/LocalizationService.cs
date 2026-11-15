@@ -1,0 +1,339 @@
+using System;
+using System.Collections.Generic;
+
+namespace CircuitForge.Services;
+
+public enum AppLanguage
+{
+    Ru,
+    En,
+    Es
+}
+
+public static class LocalizationService
+{
+    public static AppLanguage CurrentLanguage { get; set; } = AppLanguage.Es;
+
+    public static event Action? LanguageChanged;
+
+    public static void SetLanguage(AppLanguage language)
+    {
+        if (CurrentLanguage == language) return;
+        CurrentLanguage = language;
+        LanguageChanged?.Invoke();
+    }
+
+    private static readonly Dictionary<string, (string Ru, string En, string Es)> Strings = new()
+    {
+        // Subcategories / Подкатегории
+        ["Sub_Power_1P"] = ("Однофазное питание", "Single-Phase Power", "Alimentación Monofásica"),
+        ["Sub_Power_3P"] = ("Трёхфазное питание", "Three-Phase Power", "Alimentación Trifásica"),
+        ["Sub_Power_DC"] = ("Постоянное питание", "DC Power", "Alimentación DC"),
+
+        ["Sub_Breakers_Fuses"] = ("Предохранители", "Fuses", "Fusibles"),
+        ["Sub_Breakers_Mcb"] = ("Автоматы и термореле", "Breakers & Thermal Relays", "Interruptores y Relés Térmicos"),
+        ["Sub_Breakers_Rcd"] = ("Дифференциальные автоматы (УЗО)", "RCD / Differential Breakers", "Interruptores Diferenciales"),
+
+        ["Sub_Contacts_Aux"] = ("Вспомогательные контакты", "Auxiliary Contacts", "Contactos Auxiliares"),
+        ["Sub_Contacts_Timer"] = ("Контакты таймера", "Timer Contacts", "Contactos de Temporizador"),
+        ["Sub_Contacts_Thermal"] = ("Контакты термореле", "Thermal Relay Contacts", "Contactos de Relé Térmico"),
+        ["Sub_Contacts_Contactor"] = ("Контакторы", "Contactors", "Contactores"),
+
+        ["Sub_Motors_AC"] = ("Двигатели AC", "AC Motors", "Motores AC"),
+        ["Sub_Motors_DC"] = ("Двигатели DC", "DC Motors", "Motores DC"),
+
+        ["Sub_Buttons_Push"] = ("Кнопки", "Push Buttons", "Pulsadores"),
+        ["Sub_Buttons_Switch"] = ("Переключатели", "Switches", "Interruptores"),
+        ["Sub_Buttons_Limit"] = ("Концевики", "Limit Switches", "Finales de Carrera"),
+
+        ["Sub_Coils_Coils"] = ("Катушки", "Coils", "Bobinas"),
+        ["Sub_Coils_Timers"] = ("Таймеры", "Timers", "Temporizadores"),
+        ["Sub_Coils_Lamps"] = ("Лампочки", "Lamps", "Lámparas"),
+        ["Sub_Coils_Sound"] = ("Звук", "Sound Signaling", "Señalización Acústica"),
+
+        // Sound components / Звуковые элементы
+        ["Comp_Bell"] = ("Звонок", "Bell", "Timbre"),
+        ["Comp_Siren"] = ("Сирена", "Siren", "Sirena"),
+        ["Comp_Fuse"] = ("Предохранитель", "Fuse", "Fusible"),
+        ["Sim_Fuse_Ok"] = ("В норме (замкнут)", "OK (closed)", "En buen estado (cerrado)"),
+        ["Sim_Fuse_Blown"] = ("Сработал (обрыв цепи)", "Blown (open circuit)", "Fundido (circuito abierto)"),
+        ["Menu_Delete_Junction"] = ("Удалить узел", "Delete junction", "Eliminar nodo"),
+        ["Menu_Reconnect_Wire"] = ("Переподключить кабель", "Reconnect cable", "Reconectar cable"),
+        ["Menu_Delete_Wire"] = ("Удалить кабель", "Delete cable", "Eliminar cable"),
+        ["Junction_Deleted"] = ("Узел удалён.", "Junction deleted.", "Nodo eliminado."),
+        ["Junction_Merged"] = ("Кабель переподключён без узла.", "Cable reconnected without junction.", "Cable reconectado sin nodo."),
+        ["Junction_Reconnect_Pick"] = ("Выбери клемму для переподключения кабеля от узла.", "Select a terminal to connect from the junction.", "Seleccione un borne para conectar desde el nodo."),
+        ["Comp_TimerOnContactNO"] = ("Контакт таймера вкл. NO (7-8)", "On-Delay Contact NO (7-8)", "Contacto Retardo Conexión NA (7-8)"),
+        ["Comp_TimerOnContactNC"] = ("Контакт таймера вкл. NC (5-6)", "On-Delay Contact NC (5-6)", "Contacto Retardo Conexión NC (5-6)"),
+        ["Comp_TimerOffContactNO"] = ("Контакт таймера выкл. NO (7-8)", "Off-Delay Contact NO (7-8)", "Contacto Retardo Desconexión NA (7-8)"),
+        ["Comp_TimerOffContactNC"] = ("Контакт таймера выкл. NC (5-6)", "Off-Delay Contact NC (5-6)", "Contacto Retardo Desconexión NC (5-6)"),
+        ["Comp_TimerOnOffContactNO_NC"] = ("Контакт таймера вкл/выкл (5-6/7-8)", "On/Off-Delay Contact (5-6/7-8)", "Contacto Retardo Conex./Desconex. (5-6/7-8)"),
+        ["Timer_Delay_On"] = ("TON — задержка включения (сек):", "TON — on-delay (sec):", "TON — retardo a la conexión (seg):"),
+        ["Timer_Delay_Off"] = ("TOF — задержка выключения (сек):", "TOF — off-delay (sec):", "TOF — retardo a la desconexión (seg):"),
+        ["Comp_TimerOnDelay"] = ("Таймер задержки включения", "On-Delay Timer", "Temporizador a la Conexión"),
+        ["Comp_TimerOffDelay"] = ("Таймер задержки выключения", "Off-Delay Timer", "Temporizador a la Desconexión"),
+        ["Comp_TimerOnOffDelay"] = ("Таймер вкл/выкл", "On/Off-Delay Timer", "Temporizador Conexión/Desconexión"),
+        ["Timer_Edit_Title"] = ("Настройка реле времени", "Timer Relay Settings", "Configuración del Temporizador"),
+        ["Timer_Delay_On"] = ("Задержка включения (сек):", "On-delay time (sec):", "Retardo a la conexión (seg):"),
+        ["Timer_Delay_Off"] = ("Задержка выключения (сек):", "Off-delay time (sec):", "Retardo a la desconexión (seg):"),
+        ["Sim_Timer_Idle"] = ("Ожидание · контакты в исходном положении", "Idle · contacts in normal state", "En reposo · contactos en estado normal"),
+        ["Sim_Timer_Counting"] = ("Отсчёт времени ({0:0.#} с)...", "Timing ({0:0.#} s)...", "Temporizando ({0:0.#} s)..."),
+        ["Sim_Timer_Active"] = ("Сработал · контакты переключены", "Active · contacts switched", "Activado · contactos conmutados"),
+        // Categories / Категории / Categorías
+        ["Cat_Power"] = ("Электропитание", "Power Supply", "Alimentación"),
+        ["Cat_Breakers"] = ("Автоматы", "Breakers & RCD", "Interruptores y Diferenciales"),
+        ["Cat_Contactors"] = ("Контакторы и переключатели", "Contactors & Switches", "Contactores e Interruptores"),
+        ["Cat_Motors"] = ("Моторы", "Motors", "Motores"),
+        ["Cat_Buttons"] = ("Кнопки", "Push Buttons", "Pulsadores"),
+        ["Cat_Coils"] = ("Катушки и лампы", "Coils & Lamps", "Bobinas y Lámparas"),
+        ["Cat_Relays"] = ("Реле", "Relays", "Relés"),
+        ["Cat_Other"] = ("Прочее", "Other", "Otros"),
+
+        // Menus / Меню
+        ["Menu_File"] = ("Файл", "File", "Archivo"),
+        ["Menu_New"] = ("Создать", "New", "Nuevo"),
+        ["Menu_Open"] = ("Открыть…", "Open…", "Abrir…"),
+        ["Menu_Save"] = ("Сохранить", "Save", "Guardar"),
+        ["Menu_Window"] = ("Окно", "Window", "Ventana"),
+        ["Menu_Settings"] = ("Настройки", "Settings", "Configuración"),
+        ["Menu_Language"] = ("Язык", "Language", "Idioma"),
+        ["Menu_Theme"] = ("Тема", "Theme", "Tema"),
+        ["Rotate"] = ("↻ Поворот", "↻ Rotate", "↻ Girar"),
+        ["Work_Area"] = ("РАБОЧЕЕ ПОЛЕ", "WORKSPACE", "ÁREA DE TRABAJO"),
+        ["Theme_Day"] = ("Дневная", "Light", "Claro"),
+        ["Theme_Night"] = ("Ночная", "Dark", "Oscuro"),
+        ["Back"] = ("‹ Назад", "‹ Back", "‹ Atrás"),
+
+        // Simulation / Симуляция
+        ["Run"] = ("Пуск", "Run", "Iniciar"),
+        ["Stop"] = ("Стоп", "Stop", "Detener"),
+        ["Sim_Stopped"] = ("Симуляция остановлена", "Simulation stopped", "Simulación detenida"),
+        ["Sim_Stopped_Edit_Ready"] = ("Симуляция остановлена. Редактирование схемы снова доступно.", "Simulation stopped. Schematic editing is available again.", "Simulación detenida. La edición del esquema está disponible nuevamente."),
+        ["Sim_Stop_First"] = ("Останови симуляцию, чтобы редактировать схему.", "Stop the simulation to edit the circuit.", "Detenga la simulación para editar el circuito."),
+        ["Sim_Stop_Before_Open"] = ("Останови симуляцию перед открытием другого проекта.", "Stop the simulation before opening another project.", "Detenga la simulación antes de abrir otro proyecto."),
+        ["Sim_Stop_Before_Undo"] = ("Останови симуляцию перед отменой действия.", "Stop the simulation before undoing an action.", "Detenga la simulación antes de deshacer una acción."),
+        ["Sim_Stop_Before_Rotate"] = ("Останови симуляцию, чтобы поворачивать элементы.", "Stop the simulation to rotate elements.", "Detenga la simulación para girar elementos."),
+        ["Sim_No_Active_Source"] = ("Нет включённого источника питания", "No active power source", "No hay fuente de alimentación activa"),
+        ["Sim_Short_Circuit_Source"] = ("Короткое замыкание между проводниками источника", "Short circuit between source conductors", "Cortocircuito entre conductores de la fuente"),
+        ["Sim_Short_Circuit_Warning"] = ("Короткое замыкание: отключи питание и проверь проводку", "Short circuit: disconnect power and check wiring", "Cortocircuito: desconecte la alimentación y revise el cableado"),
+        ["Sim_Short_Circuit_No_Breaker"] = ("Короткое замыкание: автомат/защита не обнаружены", "Short circuit: no breaker/protection found", "Cortocircuito: no se encontró protección"),
+        ["Sim_Solve_Check_Sources"] = ("Не удалось решить схему: проверь соединения источников", "Failed to solve circuit: check source connections", "No se pudo resolver el circuito: revise las conexiones de las fuentes"),
+        ["Sim_Solve_Error"] = ("Ошибка расчёта электрической цепи", "Circuit solver error", "Error al calcular el circuito eléctrico"),
+        ["Sim_Active_Loads"] = ("Активных нагрузок: {0}", "Active loads: {0}", "Cargas activas: {0}"),
+        ["Sim_Source_On_No_Loads"] = ("Источник включён · нагрузка не активна", "Source ON · no active loads", "Fuente conectada · sin cargas activas"),
+
+        // Simulation element states
+        ["Sim_State_Stopped"] = ("Остановлен", "Stopped", "Detenido"),
+        ["Sim_State_Off"] = ("Отключён", "Off", "Desconectado"),
+        ["Sim_State_Short_Tripped"] = ("Сработал от короткого замыкания", "Tripped by short circuit", "Disparado por cortocircuito"),
+        ["Sim_State_Overcurrent_Tripped"] = ("Сработал от сверхтока", "Tripped by overcurrent", "Disparado por sobrecorriente"),
+        ["Sim_Limit_NO_On"] = ("Сработал · контакт замкнут", "Actuated · contact closed", "Activado · contacto cerrado"),
+        ["Sim_Limit_NO_Off"] = ("Исходное · контакт открыт", "Idle · contact open", "Reposo · contacto abierto"),
+        ["Sim_Limit_NC_On"] = ("Исходное · контакт замкнут", "Idle · contact closed", "Reposo · contacto cerrado"),
+        ["Sim_Limit_NC_Off"] = ("Сработал · контакт открыт", "Actuated · contact open", "Activado · contacto abierto"),
+        ["Sim_Btn_NO_Pressed"] = ("Нажата · контакт замкнут", "Pressed · contact closed", "Pulsado · contacto cerrado"),
+        ["Sim_Btn_NO_Released"] = ("Отпущена · контакт открыт", "Released · contact open", "Soltado · contacto abierto"),
+        ["Sim_Btn_NC_Pressed"] = ("Нажата · контакт открыт", "Pressed · contact open", "Pulsado · contacto abierto"),
+        ["Sim_Btn_NC_Released"] = ("Отпущена · контакт замкнут", "Released · contact closed", "Soltado · contacto cerrado"),
+        ["Sim_Btn_NONC_Pressed"] = ("Нажата · NC открыт, NO замкнут", "Pressed · NC open, NO closed", "Pulsado · NC abierto, NA cerrado"),
+        ["Sim_Btn_NONC_Released"] = ("Отпущена · NC замкнут, NO открыт", "Released · NC closed, NO open", "Soltado · NC cerrado, NA abierto"),
+        ["Sim_Btn_Con_Pressed"] = ("Нажата · переключена на NO", "Pressed · switched to NO", "Pulsado · conmutado a NA"),
+        ["Sim_Btn_Con_Released"] = ("Отпущена · переключена на NC", "Released · switched to NC", "Soltado · conmutado a NC"),
+        ["Sim_Toggle_NO_Closed"] = ("Замкнут · NO", "Closed · NO", "Cerrado · NA"),
+        ["Sim_Toggle_NO_Open"] = ("Разомкнут · NO", "Open · NO", "Abierto · NA"),
+        ["Sim_Toggle_NC_Closed"] = ("Замкнут · NC", "Closed · NC", "Cerrado · NC"),
+        ["Sim_Toggle_NC_Open"] = ("Разомкнут · NC", "Open · NC", "Abierto · NC"),
+        ["Sim_Toggle_NONC_NO"] = ("Положение NO · NO замкнут, NC открыт", "NO position · NO closed, NC open", "Posición NA · NA cerrado, NC abierto"),
+        ["Sim_Toggle_NONC_NC"] = ("Положение NC · NC замкнут, NO открыт", "NC position · NC closed, NO open", "Posición NC · NC cerrado, NA abierto"),
+        ["Sim_Toggle_Con_NO"] = ("Переключён на NO", "Switched to NO", "Conmutado a NA"),
+        ["Sim_Toggle_Con_NC"] = ("Переключён на NC", "Switched to NC", "Conmutado a NC"),
+        ["Sim_Crossover_Crossed"] = ("Перекрёстное соединение", "Crossed connection", "Conexión cruzada"),
+        ["Sim_Crossover_Direct"] = ("Прямое соединение", "Direct connection", "Conexión directa"),
+        ["Sim_Aux_NO_Closed"] = ("Замкнут · NO", "Closed · NO", "Cerrado · NA"),
+        ["Sim_Aux_NO_Open"] = ("Открыт · NO", "Open · NO", "Abierto · NA"),
+        ["Sim_Aux_NC_Closed"] = ("Замкнут · NC", "Closed · NC", "Cerrado · NC"),
+        ["Sim_Aux_NC_Open"] = ("Открыт · NC", "Open · NC", "Abierto · NC"),
+        ["Sim_Aux_NONC_Closed"] = ("Замкнут · NO+NC", "Closed · NO+NC", "Cerrado · NA+NC"),
+        ["Sim_Aux_NONC_Open"] = ("Открыт · NO+NC", "Open · NO+NC", "Abierto · NA+NC"),
+        ["Sim_Con_Coil_On"] = ("Переключён на NO · катушка включена", "Switched to NO · coil energized", "Conmutado a NA · bobina energizada"),
+        ["Sim_Con_Coil_Off"] = ("Переключён на NC · катушка отключена", "Switched to NC · coil de-energized", "Conmutado a NC · bobina desenergizada"),
+        ["Sim_Overload_Tripped"] = ("Сработала · нажми для сброса", "Tripped · click to reset", "Disparado · clic para restablecer"),
+        ["Sim_Overload_Normal"] = ("Норма · нажми для имитации перегрузки", "Normal · click to simulate overload", "Normal · clic para simular sobrecarga"),
+        ["Sim_OverloadNO_Closed"] = ("Замкнут · NO 97-98", "Closed · NO 97-98", "Cerrado · NA 97-98"),
+        ["Sim_OverloadNO_Open"] = ("Разомкнут · NO 97-98", "Open · NO 97-98", "Abierto · NA 97-98"),
+        ["Sim_ThermalNC_Closed"] = ("Замкнут · NC 95-96", "Closed · NC 95-96", "Cerrado · NC 95-96"),
+        ["Sim_ThermalNC_Open"] = ("Разомкнут · NC 95-96", "Open · NC 95-96", "Abierto · NC 95-96"),
+        ["Sim_ThermalNONC_Tripped"] = ("Сработало · NC открыт, NO замкнут", "Tripped · NC open, NO closed", "Disparado · NC abierto, NA cerrado"),
+        ["Sim_ThermalNONC_Normal"] = ("Норма · NC замкнут, NO открыт", "Normal · NC closed, NO open", "Normal · NC cerrado, NA abierto"),
+        ["Sim_ThermalRelay_Normal"] = ("Норма · нажми для имитации срабатывания", "Normal · click to simulate trip", "Normal · clic para simular disparo"),
+        ["Sim_Contactor_On"] = ("Включён катушкой с таким же обозначением", "Energized by coil with the same tag", "Activado por bobina con la misma referencia"),
+        ["Sim_Contactor_Wait"] = ("Ожидает включения катушки с таким же обозначением", "Waiting for coil with the same tag", "Esperando bobina con la misma referencia"),
+        ["Sim_Breaker_On"] = ("Включён · нажми для отключения", "ON · click to switch off", "Conectado · clic para desconectar"),
+        ["Sim_Breaker_Off"] = ("Отключён / сработал · нажми для включения", "OFF / tripped · click to switch on", "Desconectado / disparado · clic para conectar"),
+        ["Sim_Rcd_Off"] = ("Отключён · нажми для включения", "OFF · click to switch on", "Desconectado · clic para conectar"),
+        ["Sim_Breaker1P_On"] = ("Контакт замкнут · нажми для отключения", "Contact closed · click to open", "Contacto cerrado · clic para abrir"),
+        ["Sim_Breaker1P_Off"] = ("Контакт разомкнут · нажми для включения", "Contact open · click to close", "Contacto abierto · clic para cerrar"),
+        ["Sim_MultiPole_On"] = ("Контакты замкнуты · нажми для отключения", "Contacts closed · click to open", "Contactos cerrados · clic para abrir"),
+        ["Sim_MultiPole_Off"] = ("Контакты разомкнуты · нажми для включения", "Contacts open · click to close", "Contactos abiertos · clic para cerrar"),
+        ["Sim_Source_On"] = ("Источник включён · нажми для отключения", "Source ON · click to switch off", "Fuente conectada · clic para apagar"),
+        ["Sim_Source_Off"] = ("Источник отключён · нажми для включения", "Source OFF · click to switch on", "Fuente desconectada · clic para encender"),
+        ["Sim_Load_On"] = ("Под напряжением", "Energized", "Con tensión"),
+        ["Sim_Load_Off"] = ("Обесточен", "De-energized", "Sin tensión"),
+        ["Sim_Generic_On"] = ("Активен", "Active", "Activo"),
+        ["Sim_Generic_Off"] = ("Не активен", "Inactive", "Inactivo"),
+
+        // Wires / Провода
+        ["Wire"] = ("Провод", "Wire", "Cable"),
+        ["Wire_Color"] = ("Цвет провода", "Wire Color", "Color del cable"),
+        ["Wire_Color_Brown"] = ("Коричневый", "Brown", "Marrón"),
+        ["Wire_Color_Black"] = ("Чёрный", "Black", "Negro"),
+        ["Wire_Color_Grey"] = ("Серый", "Grey", "Gris"),
+        ["Wire_Color_Blue"] = ("Синий", "Blue", "Azul"),
+        ["Wire_Color_GreenYellow"] = ("Жёлто-зелёный", "Green-Yellow", "Verde-Amarillo"),
+        ["Wire_Color_Red"] = ("Красный", "Red", "Rojo"),
+
+        // Lamp glow colors / Цвета свечения ламп
+        ["Glow_Color"] = ("Цвет свечения", "Glow Color", "Color de brillo"),
+        ["Glow_Yellow"] = ("Жёлтый", "Yellow", "Amarillo"),
+        ["Glow_Orange"] = ("Оранжевый", "Orange", "Naranja"),
+        ["Glow_Red"] = ("Красный", "Red", "Rojo"),
+        ["Glow_Green"] = ("Зелёный", "Green", "Verde"),
+
+        // Components / Компоненты
+        ["Comp_PowerPhase"] = ("Фаза", "Phase", "Fase"),
+        ["Comp_PowerNeutral"] = ("Нейтраль", "Neutral", "Neutro"),
+        ["Comp_PowerEarth"] = ("Земля", "Earth PE", "Tierra PE"),
+        ["Comp_PowerPhaseNeutral"] = ("Фаза и нейтраль", "Phase & Neutral", "Fase y Neutro"),
+        ["Comp_PowerPhaseNeutralEarth"] = ("Фаза, нейтраль и земля", "Phase, Neutral & Earth", "Fase, Neutro y Tierra"),
+        ["Comp_PowerThreePhase"] = ("Три фазы", "Three Phase", "Trifásico"),
+        ["Comp_PowerThreePhaseEarth"] = ("Три фазы и земля", "Three Phase & Earth", "Trifásico y Tierra"),
+        ["Comp_PowerThreePhaseNeutral"] = ("Три фазы и нейтраль", "Three Phase & Neutral", "Trifásico y Neutro"),
+        ["Comp_PowerThreePhaseNeutralEarth"] = ("Три фазы, нейтраль и земля", "Three Phase, Neutral & Earth", "Trifásico, Neutro y Tierra"),
+        ["Comp_PowerPlus"] = ("Плюс DC", "DC Plus (+)", "Positivo DC (+)"),
+        ["Comp_PowerMinus"] = ("Минус DC", "DC Minus (−)", "Negativo DC (−)"),
+        ["Comp_PowerDcEarth"] = ("Земля DC", "DC Earth", "Tierra DC"),
+        ["Comp_AcSupply"] = ("Источник AC", "AC Supply", "Fuente AC"),
+        ["Comp_Supply24V"] = ("24V DC", "24V DC", "24V DC"),
+        ["Comp_Motor"] = ("Двигатель", "Motor", "Motor"),
+        ["Comp_CircuitBreaker"] = ("Автомат", "Circuit Breaker", "Interruptor Automático"),
+        ["Comp_DifferentialBreaker"] = ("Дифференциальный выключатель", "Differential Breaker", "Interruptor Diferencial"),
+
+        ["Comp_Breaker1P"] = ("Автомат 1P", "1P Breaker", "Disyuntor 1P"),
+        ["Comp_Breaker1PN"] = ("Автомат 1P+N", "1P+N Breaker", "Disyuntor 1P+N"),
+        ["Comp_Breaker2P"] = ("Автомат 2P", "2P Breaker", "Disyuntor 2P"),
+        ["Comp_Breaker3P"] = ("Автомат 3P", "3P Breaker", "Disyuntor 3P"),
+        ["Comp_Breaker3PN"] = ("Автомат 3P+N", "3P+N Breaker", "Disyuntor 3P+N"),
+        ["Comp_Rcd1PN"] = ("УЗО 1P+N", "RCD 1P+N", "Diferencial 1P+N"),
+        ["Comp_Rcd3PN"] = ("УЗО 3P+N", "RCD 3P+N", "Diferencial 3P+N"),
+        ["Comp_ThermalRelay"] = ("Тепловое реле", "Thermal Overload Relay", "Relé Térmico"),
+        ["Comp_OverloadNC"] = ("Тепловая защита", "Thermal Cutout NC", "Protección Térmica NC"),
+        ["Comp_OverloadNO"] = ("Термореле NO (97-98)", "Thermal Relay NO (97-98)", "Relé Térmico NA (97-98)"),
+        ["Comp_ThermalRelayAuxNC"] = ("Термореле NC (95-96)", "Thermal Relay NC (95-96)", "Relé Térmico NC (95-96)"),
+        ["Comp_ThermalRelayAuxNO_NC"] = ("Термореле NC+NO (95-96/97-98)", "Thermal Relay NC+NO", "Relé Térmico NC+NA"),
+
+        ["Comp_Contactor2P"] = ("Контактор 2-полюсный", "2-Pole Contactor", "Contactor Bipolar 2P"),
+        ["Comp_Contactor3P"] = ("Контактор 3-полюсный", "3-Pole Contactor", "Contactor Tripolar 3P"),
+        ["Comp_Contactor4P"] = ("Контактор 4-полюсный", "4-Pole Contactor", "Contactor Tetrapolar 4P"),
+        ["Comp_AuxContactNO"] = ("Контакт NO", "Aux Contact NO", "Contacto Auxiliar NA"),
+        ["Comp_AuxContactNC"] = ("Контакт NC", "Aux Contact NC", "Contacto Auxiliar NC"),
+        ["Comp_AuxContactNO_NC"] = ("Контакт NO+NC", "Aux Contact NO+NC", "Contacto Auxiliar NA+NC"),
+        ["Comp_ConContact"] = ("CON contact", "Changeover Contact", "Contacto Conmutado"),
+
+        ["Comp_PushButtonNO"] = ("Кнопка NO", "Push Button NO", "Pulsador NA"),
+        ["Comp_PushButtonNC"] = ("Кнопка NC", "Push Button NC", "Pulsador NC"),
+        ["Comp_PushButtonNO_NC"] = ("Кнопка NO+NC", "Push Button NO+NC", "Pulsador NA+NC"),
+        ["Comp_PushButtonCon"] = ("Кнопка CON", "Push Button CON", "Pulsador Conmutador CON"),
+        ["Comp_ToggleSwitchNO"] = ("Переключатель NO", "Toggle Switch NO", "Interruptor NA"),
+        ["Comp_ToggleSwitchNC"] = ("Переключатель NC", "Toggle Switch NC", "Interruptor NC"),
+        ["Comp_ToggleSwitchNO_NC"] = ("Переключатель NO+NC", "Toggle Switch NO+NC", "Interruptor NA+NC"),
+        ["Comp_ToggleSwitchCon"] = ("Переключатель CON", "Toggle Switch CON", "Interruptor Conmutador CON"),
+        ["Comp_CrossoverSwitch"] = ("Crossover switch", "Crossover Switch", "Interruptor Cruzamiento"),
+        ["Comp_LimitSwitchNO"] = ("Концевик NO", "Limit Switch NO", "Final de Carrera NA"),
+        ["Comp_LimitSwitchNC"] = ("Концевик NC", "Limit Switch NC", "Final de Carrera NC"),
+
+        ["Comp_Coil"] = ("Катушка", "Coil", "Bobina"),
+        ["Comp_Lamp"] = ("Лампа", "Lamp", "Lámpara"),
+        ["Comp_BlinkingLamp"] = ("Лампа мигающая", "Blinking Lamp", "Lámpara Intermitente"),
+        ["Comp_AcMotor"] = ("Двигатель AC 3~", "3-Phase AC Motor", "Motor Trifásico AC"),
+        ["Comp_AcMotor1P"] = ("Двигатель AC 1~", "1-Phase AC Motor", "Motor Monofásico AC"),
+        ["Comp_DcMotor"] = ("Двигатель DC", "DC Motor", "Motor DC"),
+
+        // Dialogs & Actions
+        ["ImportedFromCadSimu"] = ("Импортировано из CADe SIMU", "Imported from CADe SIMU", "Importado desde CADe SIMU"),
+        ["Opened"] = ("Открыто", "Opened", "Abierto"),
+        ["Edit_Tag_Title"] = ("Изменить обозначение", "Edit Tag", "Editar Referencia"),
+        ["Edit_Tag_Prompt"] = ("Введите позиционное обозначение:", "Enter reference designation:", "Introduzca la referencia del componente:"),
+        ["Save_Action"] = ("Сохранить", "Save", "Guardar"),
+        ["Cancel_Action"] = ("Отмена", "Cancel", "Cancelar"),
+        ["Ready_Status"] = ("Готово. Добавь источник, компоненты и соедини их терминалы проводами.", "Ready. Add source, components and wire their terminals.", "Listo. Agregue fuentes, componentes y conecte sus bornes."),
+        ["Zoom_Status"] = ("Масштаб схемы:", "Schematic zoom:", "Escala del esquema:"),
+        ["Wire_Mode_Status"] = ("Провод · цвет: {0}. Выбери две клеммы.", "Wire · color: {0}. Select two terminals.", "Cable · color: {0}. Seleccione dos bornes."),
+        ["Wire_Connected"] = ("Провод добавлен.", "Wire connected.", "Cable conectado."),
+        ["Undo_Done"] = ("Последнее действие отменено (Ctrl+Z).", "Last action undone (Ctrl+Z).", "Última acción deshecha (Ctrl+Z)."),
+        ["Nothing_To_Undo"] = ("Отменять больше нечего.", "Nothing to undo.", "No hay nada que deshacer."),
+
+        ["Anim_Error"] = ("Ошибка анимации: {0}", "Animation error: {0}", "Error de animación: {0}"),
+        ["Draw_Error"] = ("Ошибка отрисовки: {0}", "Render error: {0}", "Error de dibujo: {0}"),
+        ["Fit_Status"] = ("Схема целиком помещена в рабочую область.", "Schematic fitted to workspace.", "Esquema ajustado al área de trabajo."),
+        ["Category_Status"] = ("Категория: {0}.", "Category: {0}.", "Categoría: {0}."),
+        ["Preview_Status"] = ("Предпросмотр «{0}»: наведи курсор на поле и щёлкни для размещения.", "Preview \"{0}\": move cursor over workspace and click to place.", "Vista previa \"{0}\": mueva el cursor sobre el área y haga clic para colocar."),
+        ["Ac_Source_Tip"] = ("Тип и напряжение источника AC", "AC source type and voltage", "Tipo y tensión de fuente AC"),
+        ["Ac_Source_Status"] = ("Источник AC: {0} фаза(ы), {1} В. Наведи на поле и щёлкни.", "AC source: {0} phase(s), {1} V. Move over workspace and click.", "Fuente AC: {0} fase(s), {1} V. Mueva al área y haga clic."),
+        ["Ac_1P_230"] = ("1 фаза · 230 В AC", "1 phase · 230 V AC", "1 fase · 230 V AC"),
+        ["Ac_1P_24"] = ("1 фаза · 24 В AC", "1 phase · 24 V AC", "1 fase · 24 V AC"),
+        ["Ac_3P_400"] = ("3 фазы · 400 В AC", "3 phases · 400 V AC", "3 fases · 400 V AC"),
+        ["Ac_3P_230"] = ("3 фазы · 230 В AC", "3 phases · 230 V AC", "3 fases · 230 V AC"),
+        ["Wire_Selected_Color_Changed"] = ("Цвет выбранного провода изменён на «{0}».", "Selected wire color changed to \"{0}\".", "Color del cable seleccionado cambiado a \"{0}\"."),
+        ["Wire_New_Color"] = ("Цвет новых проводов: {0}.", "New wires color: {0}.", "Color de nuevos cables: {0}."),
+        ["Wire_Selected_Color"] = ("Цвет выбранного провода: {0}.", "Selected wire color: {0}.", "Color del cable seleccionado: {0}."),
+        ["Wire_Connected_Color"] = ("Провод добавлен ({0}).", "Wire added ({0}).", "Cable agregado ({0})."),
+        ["Wire_Connected_Terminal"] = ("Провод подключён к клемме существующего кабеля без создания узла.", "Wire connected to existing cable terminal without creating a junction.", "Cable conectado al borne del cable existente sin crear nodo."),
+        ["Wire_Junction_Created"] = ("Провода соединены узлом.", "Wires connected with a junction.", "Cables conectados mediante un nodo."),
+        ["Wire_Pick_Start"] = ("Сначала выбери начальную клемму.", "Select the starting terminal first.", "Seleccione primero el borne inicial."),
+        ["Wire_Corner_Locked"] = ("Угол провода зафиксирован. Продолжай вести провод курсором или выбери конечную клемму.", "Wire corner locked. Continue routing or select the end terminal.", "Esquina del cable fijada. Continúe trazando o seleccione el borne final."),
+        ["Wire_Start_Selected"] = ("Начало выбрано: {0}.{1}. Веди провод курсором, щёлкай по пустому месту для изгибов, затем выбери конечную клемму.", "Start selected: {0}.{1}. Move cursor, click empty space for bends, then select end terminal.", "Inicio seleccionado: {0}.{1}. Mueva el cursor, haga clic en el vacío para doblar y luego elija el borne final."),
+        ["Wire_Pick_Other"] = ("Выбери другую клемму.", "Select another terminal.", "Seleccione otro borne."),
+        ["Wire_Edit_Segment"] = ("Тяни участок кабеля, чтобы изменить его маршрут. Delete или Backspace удаляет кабель.", "Drag a cable segment to reroute it. Delete or Backspace removes the cable.", "Arrastre un segmento del cable para cambiar su ruta. Delete o Backspace elimina el cable."),
+        ["Wire_Routed"] = ("Провод проложен.", "Wire routed.", "Cable trazado."),
+        ["Placed_Active"] = ("Размещён {0}. Инструмент остаётся активным.", "Placed {0}. Tool remains active.", "Colocado {0}. La herramienta sigue activa."),
+        ["Placed_Single"] = ("Размещён {0}.", "Placed {0}.", "Colocado {0}."),
+        ["Selection_Cleared"] = ("Выделение снято.", "Selection cleared.", "Selección anulada."),
+        ["Selection_Count"] = ("Выделено элементов: {0}. Перетащи любой из них, чтобы переместить всю группу.", "Selected elements: {0}. Drag any of them to move the group.", "Elementos seleccionados: {0}. Arrastre cualquiera para mover el grupo."),
+        ["Tool_Cancelled"] = ("Режим инструмента отменён.", "Tool cancelled.", "Herramienta cancelada."),
+        ["Wire_Deleted"] = ("Выбранный провод удалён.", "Selected wire deleted.", "Cable seleccionado eliminado."),
+        ["Elements_Deleted"] = ("Удалено элементов: {0}, вместе с подключёнными проводами.", "Deleted elements: {0}, along with connected wires.", "Elementos eliminados: {0}, junto con sus cables conectados."),
+        ["Rotate_Select_First"] = ("Сначала выбери элемент на рабочем поле.", "Select an element on the workspace first.", "Seleccione primero un elemento en el área de trabajo."),
+        ["Rotate_Preview"] = ("Поворот предпросмотра: {0}°. Щёлкни по полю, чтобы установить элемент.", "Preview rotation: {0}°. Click workspace to place.", "Rotación previa: {0}°. Haga clic en el área para colocar."),
+        ["Rotated_Count"] = ("Повернуто элементов: {0}. Подключения сохранены.", "Rotated elements: {0}. Connections preserved.", "Elementos girados: {0}. Conexiones conservadas."),
+        ["Selected_Status"] = ("Выбран {0}: {1}", "Selected {0}: {1}", "Seleccionado {0}: {1}"),
+        ["Button_Pressed_Tip"] = ("{0}: кнопка нажата. Отпусти мышь, чтобы отпустить кнопку.", "{0}: button pressed. Release mouse to release.", "{0}: pulsador presionado. Suelte el ratón para soltar."),
+        ["Contact_Controlled_Tip"] = ("{0}: {1}. Состояние задаётся управляющим элементом с таким же обозначением.", "{0}: {1}. Controlled by the element with the same tag.", "{0}: {1}. Controlado por el elemento con la misma referencia."),
+        ["Load_Controlled_Tip"] = ("{0}: {1}. Состояние определяется схемой.", "{0}: {1}. State is determined by the circuit.", "{0}: {1}. El estado lo determina el circuito."),
+        ["Batch_Start"] = ("Начальная клемма выбрана. Можно выбрать ещё клеммы этого устройства, затем клеммы второго устройства в том же порядке.", "Start terminal selected. You can select more terminals on this device, then terminals on the second device in order.", "Borne inicial seleccionado. Puede elegir más bornes de este dispositivo y luego los del segundo en el mismo orden."),
+        ["Batch_First_Count"] = ("Выбрано клемм первого устройства: {0}. Теперь выбери столько же клемм второго устройства в нужном порядке.", "First device terminals selected: {0}. Now select the same number on the second device in order.", "Bornes del primer dispositivo: {0}. Ahora seleccione la misma cantidad en el segundo dispositivo en orden."),
+        ["Batch_Second_Progress"] = ("Выбрано клемм второго устройства: {0} из {1}.", "Second device terminals selected: {0} of {1}.", "Bornes del segundo dispositivo: {0} de {1}."),
+        ["Batch_Wired_Count"] = ("Проложено проводов: {0}.", "Wires routed: {0}.", "Cables trazados: {0}."),
+        ["Save_Dialog_Title"] = ("Сохранить проект", "Save project", "Guardar proyecto"),
+        ["Saved_Status"] = ("Сохранено: {0}", "Saved: {0}", "Guardado: {0}"),
+        ["Open_Dialog_Title"] = ("Открыть проект", "Open project", "Abrir proyecto"),
+        ["Unsupported_Title"] = ("Неподдерживаемые элементы", "Unsupported elements", "Elementos no compatibles"),
+        ["Unsupported_Body"] = ("Некоторые элементы CADe SIMU пока не поддерживаются и не импортированы:\n{0}", "Some CADe SIMU elements are not supported yet and were skipped:\n{0}", "Algunos elementos de CADe SIMU aún no son compatibles y no se importaron:\n{0}"),
+        ["Unsupported_More"] = ("\nи ещё {0}", "\nand {0} more", "\ny {0} más"),
+        ["Open_Error_Title"] = ("Ошибка открытия", "Open error", "Error al abrir"),
+        ["Open_Error_Body"] = ("Не удалось открыть проект: {0}", "Failed to open project: {0}", "No se pudo abrir el proyecto: {0}")
+    };
+
+    public static string Get(string key, params object[] args)
+    {
+        if (!Strings.TryGetValue(key, out var tuple)) return key;
+
+        var format = CurrentLanguage switch
+        {
+            AppLanguage.En => tuple.En,
+            AppLanguage.Es => tuple.Es,
+            _ => tuple.Ru
+        };
+
+        return args.Length > 0 ? string.Format(format, args) : format;
+    }
+}
