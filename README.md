@@ -59,8 +59,7 @@ Go to the [**Releases**](https://github.com/sepythDev/Cirvanta-Studio/releases) 
 chmod +x ./Cirvanta
 xattr -d com.apple.quarantine ./Cirvanta
 ./Cirvanta
-
----
+   
 
 ### Controls & Shortcuts
 
