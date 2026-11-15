@@ -62,7 +62,7 @@ xattr -d com.apple.quarantine ./Cirvanta
 
 ---
 
-## Controls & Shortcuts
+### Controls & Shortcuts
 
 | Action | Shortcut / Mouse |
 |---|---|
