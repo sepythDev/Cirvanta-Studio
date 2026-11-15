@@ -1,3 +1,7 @@
+> [!WARNING]
+> **Disclaimer (Not Safety-Certified):**  
+> Cirvanta Studio is an educational and prototyping tool and is **not a certified electrical engineering or safety simulator**. It uses a simplified steady-state resistive nodal solver and does not model electrical transients, inductance, real motor dynamics, thermal heating, or certified protective-device time/current tripping curves.  
+> **Do not rely on this software** for designing real-world electrical installations, safety systems, or protection coordination. Always verify real circuits according to applicable electrical codes and with qualified electrical engineers.
 # Cirvanta Studio
 
 A modern electrical schematic editor and real-time circuit simulator built with **C#**, **.NET**, and **Avalonia UI**. Designed for industrial control circuits, motor starters, relay logic, and educational schematics.
