@@ -71,6 +71,9 @@ xattr -d com.apple.quarantine ./Cirvanta
 | Rotate selected / preview | **`R`** or toolbar button |
 | Undo | **`Ctrl + Z`** or toolbar button |
 | Save project | **`Ctrl + S`** |
+| Cut | **`Ctrl + X`** |
+| Copy | **`Ctrl + C`** |
+| Paste | **`Ctrl + V`** |
 | Delete selected | **`Delete`** / **`Backspace`** or toolbar button |
 | Multi-select | **`Shift + Click`** or drag selection box |
 | Edit component tag / timer delay | **Double-click** on component |
