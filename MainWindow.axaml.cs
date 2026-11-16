@@ -120,6 +120,12 @@ public partial class MainWindow : Window
     private PaletteItem? _paletteDragItem;
     private bool _dragging;
     private readonly HashSet<Guid> _selectedComponentIds = new();
+    private List<ComponentModel> _clipboardComponents = new();
+    private bool _isPlacingPaste;
+    private Point _clipboardCenter;
+    private bool _isClosingWindow;
+    private bool _forceClose;
+    private List<WireModel> _clipboardWires = new();
     private bool _selectingArea;
     private Point _selectionStart;
     private Point _selectionCurrent;
@@ -178,7 +184,29 @@ public partial class MainWindow : Window
                 }
             }
         };
-        Closing += (_, _) => SaveCameraState();
+        Closing += async (sender, e) =>
+        {
+            if (_forceClose) return;
+
+            var dirtyTabs = _tabs.Where(t => t.IsDirty).ToList();
+            if (dirtyTabs.Count > 0)
+            {
+                e.Cancel = true; // Приостанавливаем закрытие, чтобы показать диалог
+                foreach (var tab in dirtyTabs)
+                {
+                    var res = await PromptSaveConfirmationAsync(tab);
+                    if (res == SaveConfirmResult.Cancel)
+                        return; // Пользователь нажал "Отмена" — остаёмся в программе
+                    
+                    // Если нажали "Не сохранять" или файл успешно сохранился — сбрасываем флаг изменений
+                    tab.IsDirty = false;
+                }
+            }
+
+            _forceClose = true;
+            SaveCameraState();
+            Close(); // Теперь закроется мгновенно
+        };
         BuildPalette();
         _blinkTimer.Tick += (_, _) =>
         {
@@ -242,6 +270,154 @@ public partial class MainWindow : Window
         NewProject();
         ApplyLanguage();
         SetTheme(IsDarkTime(DateTime.Now));
+    }
+
+    private void CopySelected()
+    {
+        if (_selectedComponentIds.Count == 0 && _selected is not null)
+            _selectedComponentIds.Add(_selected.Id);
+
+        if (_selectedComponentIds.Count == 0) return;
+
+        var selectedSet = _selectedComponentIds.ToHashSet();
+
+        _clipboardComponents = _project.Components
+            .Where(c => selectedSet.Contains(c.Id))
+            .Select(c => new ComponentModel
+            {
+                Id = c.Id,
+                Kind = c.Kind,
+                Tag = c.Tag,
+                X = c.X,
+                Y = c.Y,
+                Rotation = c.Rotation,
+                Phases = c.Phases,
+                Voltage = c.Voltage,
+                DelayOnSeconds = c.DelayOnSeconds,
+                DelayOffSeconds = c.DelayOffSeconds,
+                EnableTon = c.EnableTon,
+                EnableTof = c.EnableTof,
+                GlowColorHex = c.GlowColorHex
+            }).ToList();
+
+        _clipboardWires = _project.Wires
+            .Where(w => selectedSet.Contains(w.StartComponentId) && selectedSet.Contains(w.EndComponentId))
+            .Select(w => new WireModel
+            {
+                Id = w.Id,
+                StartComponentId = w.StartComponentId,
+                StartTerminalId = w.StartTerminalId,
+                EndComponentId = w.EndComponentId,
+                EndTerminalId = w.EndTerminalId,
+                ColorKey = w.ColorKey,
+                Waypoints = (w.Waypoints ?? new List<WireWaypoint>())
+                    .Select(p => new WireWaypoint { X = p.X, Y = p.Y }).ToList()
+            }).ToList();
+
+        // Вычисляем геометрический центр копируемой группы, чтобы цеплять её к курсору
+        var avgX = _clipboardComponents.Average(c => c.X);
+        var avgY = _clipboardComponents.Average(c => c.Y);
+        _clipboardCenter = new Point(Snap(avgX), Snap(avgY));
+
+        StatusText.Text = L("Clipboard_Copied", _clipboardComponents.Count);
+    }
+
+    private void CutSelected()
+    {
+        if (_simulator.IsRunning) return;
+        CopySelected();
+        if (_clipboardComponents.Count > 0)
+        {
+            var count = _clipboardComponents.Count;
+            DeleteSelected();
+            StatusText.Text = L("Clipboard_Cut", count);
+        }
+    }
+
+    private void StartPastePlacement()
+    {
+        if (_simulator.IsRunning || _clipboardComponents.Count == 0) return;
+
+        _selected = null;
+        _selectedComponentIds.Clear();
+        _selectedWireId = null;
+        _placingKind = null;
+        _wireMode = false;
+        _isPlacingPaste = true;
+
+        StatusText.Text = L("Clipboard_Placing");
+        Redraw();
+    }
+
+    private void CommitPastedPlacement(Point clickPos)
+    {
+        if (!_isPlacingPaste || _clipboardComponents.Count == 0) return;
+
+        PushUndoState();
+
+        var targetCenter = new Point(Snap(clickPos.X), Snap(clickPos.Y));
+        var deltaX = targetCenter.X - _clipboardCenter.X;
+        var deltaY = targetCenter.Y - _clipboardCenter.Y;
+
+        var idMap = new Dictionary<Guid, Guid>();
+        var newSelectedIds = new HashSet<Guid>();
+        ComponentModel? lastPasted = null;
+
+        foreach (var c in _clipboardComponents)
+        {
+            var newId = Guid.NewGuid();
+            idMap[c.Id] = newId;
+
+            var newComp = new ComponentModel
+            {
+                Id = newId,
+                Kind = c.Kind,
+                Tag = NextTag(c.Tag),
+                X = Snap(c.X + deltaX),
+                Y = Snap(c.Y + deltaY),
+                Rotation = c.Rotation,
+                Phases = c.Phases,
+                Voltage = c.Voltage,
+                DelayOnSeconds = c.DelayOnSeconds,
+                DelayOffSeconds = c.DelayOffSeconds,
+                EnableTon = c.EnableTon,
+                EnableTof = c.EnableTof,
+                GlowColorHex = c.GlowColorHex
+            };
+
+            _project.Components.Add(newComp);
+            newSelectedIds.Add(newId);
+            lastPasted = newComp;
+        }
+
+        foreach (var w in _clipboardWires)
+        {
+            if (idMap.TryGetValue(w.StartComponentId, out var newStartId) &&
+                idMap.TryGetValue(w.EndComponentId, out var newEndId))
+            {
+                var newWaypoints = (w.Waypoints ?? new List<WireWaypoint>())
+                    .Select(p => new WireWaypoint { X = Snap(p.X + deltaX), Y = Snap(p.Y + deltaY) }).ToList();
+
+                _project.Wires.Add(new WireModel
+                {
+                    StartComponentId = newStartId,
+                    StartTerminalId = w.StartTerminalId,
+                    EndComponentId = newEndId,
+                    EndTerminalId = w.EndTerminalId,
+                    ColorKey = w.ColorKey,
+                    Waypoints = newWaypoints
+                });
+            }
+        }
+
+        _isPlacingPaste = false;
+        _selectedComponentIds.Clear();
+        foreach (var id in newSelectedIds) _selectedComponentIds.Add(id);
+        _selected = lastPasted;
+
+        RefreshSelectedStatus();
+        Redraw();
+        StatusText.Text = L("Clipboard_Pasted", newSelectedIds.Count);
     }
 
     private void LanguageRu_Click(object? sender, RoutedEventArgs e)
@@ -310,6 +486,77 @@ public partial class MainWindow : Window
     }
 
     private string CameraStatePath => System.IO.Path.Combine(AppContext.BaseDirectory, "camera-state.json");
+
+    private enum SaveConfirmResult { Save, DontSave, Cancel }
+
+    private async Task<SaveConfirmResult> PromptSaveConfirmationAsync(ProjectTab tab)
+    {
+        var tcs = new TaskCompletionSource<SaveConfirmResult>();
+
+        var saveBtn = new Button { Content = L("Btn_Save"), Width = 95, HorizontalContentAlignment = HorizontalAlignment.Center, IsDefault = true };
+        var dontSaveBtn = new Button { Content = L("Btn_DontSave"), Width = 110, HorizontalContentAlignment = HorizontalAlignment.Center };
+        var cancelBtn = new Button { Content = L("Cancel_Action"), Width = 80, HorizontalContentAlignment = HorizontalAlignment.Center, IsCancel = true };
+
+        var btnPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 8,
+            Children = { saveBtn, dontSaveBtn, cancelBtn }
+        };
+
+        var dialog = new Window
+        {
+            Title = L("Dialog_Save_Title"),
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(16),
+                Spacing = 16,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = string.Format(L("Dialog_Save_Message"), tab.DisplayTitle),
+                        TextWrapping = TextWrapping.Wrap,
+                        FontSize = 13
+                    },
+                    btnPanel
+                }
+            }
+        };
+
+        saveBtn.Click += async (_, _) =>
+        {
+            var prevTab = _activeTab;
+            if (_activeTab != tab) SwitchToTab(tab);
+            var saved = await SaveProjectAsync();
+            if (_activeTab != prevTab && prevTab is not null) SwitchToTab(prevTab);
+
+            tcs.TrySetResult(saved ? SaveConfirmResult.Save : SaveConfirmResult.Cancel);
+            dialog.Close();
+        };
+
+        dontSaveBtn.Click += (_, _) =>
+        {
+            tcs.TrySetResult(SaveConfirmResult.DontSave);
+            dialog.Close();
+        };
+
+        cancelBtn.Click += (_, _) =>
+        {
+            tcs.TrySetResult(SaveConfirmResult.Cancel);
+            dialog.Close();
+        };
+
+        dialog.Closed += (_, _) => tcs.TrySetResult(SaveConfirmResult.Cancel);
+
+        await dialog.ShowDialog(this);
+        return await tcs.Task;
+    }
 
     private void RestoreCameraState(string? projectPath)
     {
@@ -1510,8 +1757,14 @@ private void FilterPalette(string category)
         Redraw();
     }
 
-    private void CloseTab(ProjectTab tab)
+    private async void CloseTab(ProjectTab tab)
     {
+        if (tab.IsDirty)
+        {
+            var answer = await PromptSaveConfirmationAsync(tab);
+            if (answer == SaveConfirmResult.Cancel) return;
+        }
+
         var idx = _tabs.IndexOf(tab);
         if (idx < 0) return;
 
@@ -1540,7 +1793,6 @@ private void FilterPalette(string category)
 
         RebuildTabs();
     }
-
     private void RebuildTabs()
     {
         if (TabsPanel is null) return;
@@ -1977,6 +2229,12 @@ private void FilterPalette(string category)
     {
         SchematicCanvas.Focus();
         _cursorPosition = GetWorldPosition(e);
+        if (_isPlacingPaste)
+        {
+            CommitPastedPlacement(_cursorPosition);
+            e.Handled = true;
+            return;
+        }
         if (!_simulator.IsRunning && e.ClickCount == 2 && HitComponent(_cursorPosition) is { } timerComp &&
             timerComp.Kind is ComponentKind.TimerOnDelay or ComponentKind.TimerOffDelay or ComponentKind.TimerOnOffDelay)
         {
@@ -2481,7 +2739,7 @@ private async void EditTimerComponent(ComponentModel timer)
         // Перерисовываем только если реально что-то изменилось:
         // идёт перетаскивание, режим вставки/провода или изменилась подсвеченная клемма
         if (_dragging || _selectingArea || _movingWireId is not null || 
-            _placingKind is not null || _wireMode || prevHover != _hoverTerminal)
+            _placingKind is not null || _wireMode || _isPlacingPaste || prevHover != _hoverTerminal)
         {
             Redraw();
         }
@@ -3072,6 +3330,55 @@ private async void EditTimerComponent(ComponentModel timer)
             e.Handled = true;
             return;
         }
+        if (ctrl && e.Key == Key.C)
+        {
+            CopySelected();
+            e.Handled = true;
+            return;
+        }
+
+        if (ctrl && e.Key == Key.V)
+        {
+            StartPastePlacement();
+            e.Handled = true;
+            return;
+        }
+        if (ctrl && e.Key == Key.X)
+        {
+            CutSelected();
+            e.Handled = true;
+            return;
+        }
+
+        if (ctrl && e.Key == Key.C)
+        {
+            CopySelected();
+            e.Handled = true;
+            return;
+        }
+
+        if (ctrl && e.Key == Key.V)
+        {
+            StartPastePlacement();
+            e.Handled = true;
+            return;
+        }
+
+        if (ctrl && e.Key == Key.D)
+        {
+            CopySelected();
+            StartPastePlacement();
+            e.Handled = true;
+            return;
+        }
+
+        if (ctrl && e.Key == Key.D) // Дублирование в 1 клик
+        {
+            CopySelected();
+            StartPastePlacement();
+            e.Handled = true;
+            return;
+        }
 
         if (e.Key == Key.Z && ctrl)
         {
@@ -3181,6 +3488,7 @@ private async void EditTimerComponent(ComponentModel timer)
 
     private void CancelTool()
     {
+        _isPlacingPaste = false;
         _placingKind = null; _wireMode = false; _wireStart = null;
         _wireWaypoints.Clear();
         _terminalBatchSource.Clear(); _terminalBatchTarget.Clear();
@@ -3412,6 +3720,44 @@ private void Redraw()
                     ? "#2563EB"
                     : GetComponentColor(c);
                 DrawComponent(c, Brush(color));
+            }
+            if (_isPlacingPaste && !_simulator.IsRunning && _clipboardComponents.Count > 0)
+            {
+                var targetCenter = new Point(Snap(_cursorPosition.X), Snap(_cursorPosition.Y));
+                var deltaX = targetCenter.X - _clipboardCenter.X;
+                var deltaY = targetCenter.Y - _clipboardCenter.Y;
+
+                // Рисуем провода из буфера
+                foreach (var w in _clipboardWires)
+                {
+                    var startComp = _clipboardComponents.FirstOrDefault(c => c.Id == w.StartComponentId);
+                    var endComp = _clipboardComponents.FirstOrDefault(c => c.Id == w.EndComponentId);
+                    if (startComp is null || endComp is null) continue;
+
+                    var tempStart = new ComponentModel { X = Snap(startComp.X + deltaX), Y = Snap(startComp.Y + deltaY), Rotation = startComp.Rotation, Kind = startComp.Kind };
+                    var tempEnd = new ComponentModel { X = Snap(endComp.X + deltaX), Y = Snap(endComp.Y + deltaY), Rotation = endComp.Rotation, Kind = endComp.Kind };
+
+                    var pStart = TerminalPosition(tempStart, w.StartTerminalId);
+                    var pEnd = TerminalPosition(tempEnd, w.EndTerminalId);
+                    var waypoints = (w.Waypoints ?? new List<WireWaypoint>()).Select(p => new Point(Snap(p.X + deltaX), Snap(p.Y + deltaY)));
+                    var path = BuildWirePath(pStart, pEnd, waypoints);
+                    DrawWirePath(path, WireColorHex(w.ColorKey), dashed: true);
+                }
+
+                foreach (var c in _clipboardComponents)
+                {
+                    var preview = new ComponentModel
+                    {
+                        Kind = c.Kind,
+                        Tag = c.Tag,
+                        X = Snap(c.X + deltaX),
+                        Y = Snap(c.Y + deltaY),
+                        Rotation = c.Rotation,
+                        Phases = c.Phases,
+                        Voltage = c.Voltage
+                    };
+                    DrawComponent(preview, Brush("#7896C4"), true);
+                }
             }
 
             if (_simulator.IsRunning)
@@ -5416,7 +5762,7 @@ private void ApplyZoomToSchematicText(Panel panel)
 private void UpdateSimulationButtons()
 {
     SimIndicatorDot.Fill = Brush(_simulator.IsRunning ? "#22C55E" : "#94A3B8");
-    SimIndicatorText.Text = _simulator.IsRunning ? L("Run") : L("Stop");
+    SimIndicatorText.Text = L(_simulator.IsRunning ? "Sim_Badge_Running" : "Sim_Badge_Stopped");
     RunButton.IsVisible = !_simulator.IsRunning;
     StopButton.IsVisible = _simulator.IsRunning;
 
@@ -5597,6 +5943,12 @@ private void UpdateSimulationButtons()
             _ => "ES"
         };
         ToolTip.SetTip(ThemeToggleButton, L("Menu_Theme"));
+        ToolTip.SetTip(UndoToolbarButton, L("Tool_Undo"));
+        ToolTip.SetTip(RotateToolbarButton, L("Tool_Rotate"));
+        ToolTip.SetTip(DeleteToolbarButton, L("Tool_Delete"));
+        ToolTip.SetTip(WireColorToolbarButton, L("Tool_WireColor"));
+        ToolTip.SetTip(NewTabButton, L("Tab_New"));
+        SimIndicatorText.Text = L(_simulator.IsRunning ? "Sim_Badge_Running" : "Sim_Badge_Stopped");
         ToolTip.SetTip(LanguageButton, L("Menu_Language"));
 
         var categoryKeys = new[] { "Cat_Power", "Cat_Breakers", "Cat_Contactors", "Cat_Motors", "Cat_Buttons", "Cat_Coils", "Cat_Relays" };
@@ -5640,7 +5992,7 @@ private void UpdateSimulationButtons()
         await SaveProjectAsync();
     }
 
-    private async Task SaveProjectAsync()
+    private async Task<bool> SaveProjectAsync()
     {
         var path = _currentFilePath;
         if (string.IsNullOrWhiteSpace(path))
@@ -5658,22 +6010,21 @@ private void UpdateSimulationButtons()
                 }
             });
             path = file?.TryGetLocalPath();
-            if (string.IsNullOrWhiteSpace(path)) return;
+            if (string.IsNullOrWhiteSpace(path)) return false;
             if (string.IsNullOrEmpty(System.IO.Path.GetExtension(path))) path += ".cforge";
         }
         _files.Save(path, _project);
+        _currentFilePath = path;
         if (_activeTab is not null)
         {
             _activeTab.FilePath = path;
             _activeTab.IsDirty = false;
         }
-        _currentFilePath = path;
-        if (_activeTab is not null) _activeTab.FilePath = path;
         RebuildTabs();  
         SaveCameraState();
         StatusText.Text = L("Saved_Status", System.IO.Path.GetFileName(path));
+        return true;
     }
-    
     private void CenterProjectOnCanvas(ProjectDocument doc)
     {
         if (doc.Components.Count == 0) return;

@@ -25,6 +25,21 @@ public static class LocalizationService
 
     private static readonly Dictionary<string, (string Ru, string En, string Es)> Strings = new()
     {
+        ["Dialog_Save_Title"] = ("Несохранённые изменения", "Unsaved Changes", "Cambios sin guardar"),
+        ["Dialog_Save_Message"] = ("Сохранить изменения в «{0}»?", "Save changes to \"{0}\"?", "¿Guardar los cambios en \"{0}\"?"),
+        ["Clipboard_Cut"] = ("Вырезано элементов: {0}.", "Cut {0} element(s).", "Cortado(s) {0} elemento(s)."),
+        ["Clipboard_Placing"] = ("Кликните для вставки, Esc для отмены.", "Click to place, Esc to cancel.", "Haga clic para colocar, Esc para cancelar."),
+        ["Btn_Save"] = ("Сохранить", "Save", "Guardar"),
+        ["Btn_DontSave"] = ("Не сохранять", "Don't Save", "No guardar"),
+        ["Clipboard_Copied"] = ("Скопировано элементов: {0}.", "Copied {0} element(s).", "Copiado(s) {0} elemento(s)."),
+        ["Clipboard_Pasted"] = ("Вставлено элементов: {0}.", "Pasted {0} element(s).", "Pegado(s) {0} elemento(s)."),
+        ["Sim_Badge_Running"] = ("Запущено", "Running", "En ejecución"),
+        ["Sim_Badge_Stopped"] = ("Остановлено", "Stopped", "Detenido"),
+        ["Tool_Undo"] = ("Отменить (Ctrl+Z)", "Undo (Ctrl+Z)", "Deshacer (Ctrl+Z)"),
+        ["Tool_Rotate"] = ("Повернуть (R)", "Rotate (R)", "Girar (R)"),
+        ["Tool_Delete"] = ("Удалить (Del)", "Delete (Del)", "Eliminar (Del)"),
+        ["Tool_WireColor"] = ("Цвет провода", "Wire Color", "Color del cable"),
+        ["Tab_New"] = ("Новая вкладка", "New Tab", "Nueva pestaña"),
         // Subcategories / Подкатегории
         ["Sub_Power_1P"] = ("Однофазное питание", "Single-Phase Power", "Alimentación Monofásica"),
         ["Sub_Power_3P"] = ("Трёхфазное питание", "Three-Phase Power", "Alimentación Trifásica"),
