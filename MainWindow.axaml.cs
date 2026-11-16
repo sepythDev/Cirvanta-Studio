@@ -205,7 +205,7 @@ public partial class MainWindow : Window
 
             _forceClose = true;
             SaveCameraState();
-            Close(); // Теперь закроется мгновенно
+            Close(); 
         };
         BuildPalette();
         _blinkTimer.Tick += (_, _) =>

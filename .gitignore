@@ -4,3 +4,7 @@ publish/
 publish-current/
 build-check*/
 startup-check/
+echo obj-check/ >> .gitignore
+git add .
+git commit -m "Update MainWindow and ignore obj-check"
+git push origin main --force
