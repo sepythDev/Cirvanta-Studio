@@ -30,6 +30,9 @@ public partial class MainWindow : Window
     private bool _blinkOn = true;
     private readonly List<CurrentFlowDotVisual> _currentFlowDots = new();
     private readonly List<BlinkingLampVisual> _blinkingLampVisuals = new();
+    private readonly DispatcherTimer _importWarningTimer = new() { Interval = TimeSpan.FromMilliseconds(40) };
+    private readonly List<Control> _importWarningVisuals = new();
+    private readonly List<Ellipse> _importWarningRings = new();
     private readonly List<PaletteItem> _palette = new();
     private Button? _activeCategoryButton;
     private string? _activeCategory;
@@ -73,6 +76,8 @@ public partial class MainWindow : Window
     private  Stack<ProjectDocument> _undoStack = new();
     private sealed class ProjectTab
     {   
+        public DateTime? ImportWarningShownUtc { get; set; }
+        public HashSet<(Guid ComponentId, string TerminalId)> CadImportUnconnectedTerminals { get; } = new();
         public bool IsDirty { get; set; }
         public Guid Id { get; } = Guid.NewGuid();
         public ProjectDocument Project { get; set; } = new();
@@ -99,6 +104,8 @@ public partial class MainWindow : Window
     private readonly ScaleTransform _zoomTransform = new(1.0, 1.0);
     private readonly TranslateTransform _panTransform = new(0, 0);
     private bool _panning;
+    private bool _handMode;
+    private bool _spacePanning;
     private IPointer? _pointer;
     private PaletteItem? _dragInFlight;
     private bool _dragOverCanvas;
@@ -123,7 +130,6 @@ public partial class MainWindow : Window
     private List<ComponentModel> _clipboardComponents = new();
     private bool _isPlacingPaste;
     private Point _clipboardCenter;
-    private bool _isClosingWindow;
     private bool _forceClose;
     private List<WireModel> _clipboardWires = new();
     private bool _selectingArea;
@@ -134,6 +140,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<Guid, List<Point>> _wireDragOrigins = new();
     private Guid? _movingWireId;
     private int _movingWireSegment;
+    private GridLayer? _gridLayer;
     private Point _wireMoveStart;
     private List<Point>? _wireMoveOriginalPath;
     private bool _wireMoveUndoSaved;
@@ -208,6 +215,7 @@ public partial class MainWindow : Window
             Close(); 
         };
         BuildPalette();
+        _importWarningTimer.Tick += (_, _) => UpdateImportWarningAnimation();
         _blinkTimer.Tick += (_, _) =>
         {
             _blinkOn = !_blinkOn;
@@ -267,11 +275,72 @@ public partial class MainWindow : Window
         Viewport.AddHandler(InputElement.PointerMovedEvent, Canvas_MiddleMouseMove, RoutingStrategies.Tunnel);
         Viewport.AddHandler(InputElement.PointerReleasedEvent, Canvas_MiddleMouseUp, RoutingStrategies.Tunnel);
         AddHandler(KeyDownEvent, Window_PreviewKeyDown, RoutingStrategies.Tunnel);
+        AddHandler(KeyUpEvent, Window_PreviewKeyUp, RoutingStrategies.Tunnel);
         NewProject();
         ApplyLanguage();
         SetTheme(IsDarkTime(DateTime.Now));
     }
 
+
+    private void HandTool_Click(object? sender, RoutedEventArgs e)
+    {
+        _handMode = !_handMode;
+        UpdateHandToolAppearance();
+        Cursor = new Cursor(_handMode ? StandardCursorType.Hand : StandardCursorType.Arrow);
+    }
+
+    private void UpdateHandToolAppearance()
+    {
+        var active = _handMode || _spacePanning;
+        if (active)
+        {
+            HandToolButton.Background = Brush("#2563EB");
+            HandToolButton.BorderBrush = Brush("#60A5FA");
+            HandToolIcon.Fill = Brushes.White;
+        }
+        else
+        {
+            HandToolButton.ClearValue(BackgroundProperty);
+            HandToolButton.ClearValue(BorderBrushProperty);
+            HandToolIcon.Fill = _darkTheme ? Brush("#E2E8F0") : Brush("#334155");
+        }
+    }
+
+    private void ZoomIn_Click(object? sender, RoutedEventArgs e) => ApplyZoomStep(1.15);
+    private void ZoomOut_Click(object? sender, RoutedEventArgs e) => ApplyZoomStep(1.0 / 1.15);
+
+
+    private void ApplyZoomStep(double factor)
+    {
+        var oldZoom = _zoom;
+        _zoom = Math.Clamp(_zoom * factor, 0.35, 3.0);
+        var ratio = _zoom / oldZoom;
+        var center = new Point(Viewport.Bounds.Width / 2.0, Viewport.Bounds.Height / 2.0);
+
+        _panTransform.X = center.X - (center.X - _panTransform.X) * ratio;
+        _panTransform.Y = center.Y - (center.Y - _panTransform.Y) * ratio;
+        _gridLayer?.SetZoom(_zoom);
+        _zoomTransform.ScaleX = _zoom;
+        _zoomTransform.ScaleY = _zoom;
+        ZoomStatusText.Text = $"{Math.Round(_zoom * 100)}%";
+        Redraw();
+        SaveCameraState();
+    }
+
+    private void Window_PreviewKeyUp(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Space)
+        {
+            if (_spacePanning)
+            {
+                _spacePanning = false;
+                UpdateHandToolAppearance();
+                if (!_panning)
+                    Cursor = new Cursor(_handMode ? StandardCursorType.Hand : StandardCursorType.Arrow);
+            }
+            e.Handled = true;
+        }
+    }
     private void CopySelected()
     {
         if (_selectedComponentIds.Count == 0 && _selected is not null)
@@ -338,6 +407,7 @@ public partial class MainWindow : Window
     {
         if (_simulator.IsRunning || _clipboardComponents.Count == 0) return;
 
+        DisableHandMode();
         _selected = null;
         _selectedComponentIds.Clear();
         _selectedWireId = null;
@@ -917,6 +987,7 @@ private void FilterPalette(string category)
                 _paletteMouseDownPoint = null;
                 _paletteDragItem = null;
                 _dragInFlight = dragItem;
+                DisableHandMode();
                 try
                 {
                     var data = new DataObject();
@@ -938,6 +1009,7 @@ private void FilterPalette(string category)
                 StatusText.Text = L("Sim_Stop_First");
                 return;
             }
+            DisableHandMode();
             _wireMode = title == "Провод";
             _wireStart = null;
             _placingKind = _wireMode ? null : kind;
@@ -1103,6 +1175,15 @@ private void FilterPalette(string category)
 
         Canvas.SetLeft(glyph, x);
         canvas.Children.Add(glyph);
+    }
+
+    private void DisableHandMode()
+    {
+        if (!_handMode) return;
+        _handMode = false;
+        UpdateHandToolAppearance();
+        if (!_spacePanning && !_panning)
+            Cursor = new Cursor(StandardCursorType.Arrow);
     }
     private Control MiniSymbol(ComponentKind? kind, bool wire)
     {
@@ -1566,16 +1647,16 @@ private void FilterPalette(string category)
         }
         else if (kind is ComponentKind.Rcd1PN or ComponentKind.Rcd3PN)
         {
-            AddLine(c, 16, 0, 16, 6, p, 1.4);
-            AddLine(c, 10, 6, 16, 10, p, 1.4);
-            AddLine(c, 16, 10, 16, 14, p, 1.4);
+            AddLine(c, 16, 0, 16, 4, p, 1.4);     
+            AddLine(c, 10, 8, 16, 12, p, 1.4);    
+            AddLine(c, 16, 12, 16, 15, p, 1.4);
             c.Children.Add(new Polygon
             {
-                Points = new PointCollection { new(8, 6), new(10, 4), new(12, 6), new(10, 8) },
+                Points = new PointCollection { new(8, 8), new(10, 6), new(12, 8), new(10, 10) },
                 Fill = p, Stroke = p, StrokeThickness = 1.4
             });
-            c.Children.Add(new Rectangle { Width = 22, Height = 8, Stroke = p, StrokeThickness = 1.4 });
-            Canvas.SetLeft(c.Children[^1], 5); Canvas.SetTop(c.Children[^1], 14);
+            c.Children.Add(new Rectangle { Width = 22, Height = 7, Stroke = p, StrokeThickness = 1.4 });
+            Canvas.SetLeft(c.Children[^1], 5); Canvas.SetTop(c.Children[^1], 15);
             AddLine(c, 16, 22, 16, 26, p, 1.4);
         }
         else if (kind == ComponentKind.ThermalRelay)
@@ -1754,6 +1835,16 @@ private void FilterPalette(string category)
 
         UpdateSimulationButtons();
         RebuildTabs();
+        if (tab.ImportWarningShownUtc is DateTime startedAt &&
+            tab.CadImportUnconnectedTerminals.Count > 0 &&
+            (DateTime.UtcNow - startedAt).TotalSeconds < 6.2)
+        {
+            _importWarningTimer.Start();
+        }
+        else
+        {
+            _importWarningTimer.Stop();
+        }
         Redraw();
     }
 
@@ -1938,26 +2029,43 @@ private void FilterPalette(string category)
 
     private void Canvas_MiddleMouseDown(object? sender, PointerPressedEventArgs e)
     {
-        if (e.GetCurrentPoint(Viewport).Properties.PointerUpdateKind != PointerUpdateKind.MiddleButtonPressed) return;
-        if (e.ClickCount >= 2)
+        var kind = e.GetCurrentPoint(Viewport).Properties.PointerUpdateKind;
+        var isMiddle = kind == PointerUpdateKind.MiddleButtonPressed;
+        var isHandLeft = kind == PointerUpdateKind.LeftButtonPressed && (_handMode || _spacePanning);
+
+        if (!isMiddle && !isHandLeft) return;
+
+        if (isMiddle && e.ClickCount >= 2)
         {
             _panning = false;
-            ReleaseCapture();
+            if (ReferenceEquals(e.Pointer.Captured, Viewport)) e.Pointer.Capture(null);
             FitSchematicToViewport();
+            _gridLayer?.SetZoom(_zoom);
+            ZoomStatusText.Text = $"{Math.Round(_zoom * 100)}%";
             e.Handled = true;
             return;
         }
+
         _panning = true;
         _panLastPoint = e.GetPosition(Viewport);
         _pointer = e.Pointer;
-        e.Pointer.Capture(SchematicCanvas);
+        e.Pointer.Capture(Viewport);
         Cursor = new Cursor(StandardCursorType.SizeAll);
         e.Handled = true;
     }
 
     private void Canvas_MiddleMouseMove(object? sender, PointerEventArgs e)
     {
-        if (!_panning || !e.GetCurrentPoint(Viewport).Properties.IsMiddleButtonPressed) return;
+        if (!_panning) return;
+        var props = e.GetCurrentPoint(Viewport).Properties;
+        if (!props.IsMiddleButtonPressed && !props.IsLeftButtonPressed)
+        {
+            _panning = false;
+            if (ReferenceEquals(e.Pointer.Captured, Viewport)) e.Pointer.Capture(null);
+            Cursor = new Cursor(_handMode || _spacePanning ? StandardCursorType.Hand : StandardCursorType.Arrow);
+            return;
+        }
+
         var current = e.GetPosition(Viewport);
         _panTransform.X += current.X - _panLastPoint.X;
         _panTransform.Y += current.Y - _panLastPoint.Y;
@@ -1967,11 +2075,14 @@ private void FilterPalette(string category)
 
     private void Canvas_MiddleMouseUp(object? sender, PointerReleasedEventArgs e)
     {
-        if (e.InitialPressMouseButton != MouseButton.Middle || !_panning) return;
+        if (!_panning) return;
+        if (e.InitialPressMouseButton is not (MouseButton.Middle or MouseButton.Left)) return;
+
         _panning = false;
         _pointer = e.Pointer;
-        ReleaseCapture();
-        Cursor = new Cursor(StandardCursorType.Arrow);
+        if (ReferenceEquals(e.Pointer.Captured, Viewport))
+            e.Pointer.Capture(null);
+        Cursor = new Cursor(_handMode || _spacePanning ? StandardCursorType.Hand : StandardCursorType.Arrow);
         SaveCameraState();
         e.Handled = true;
     }
@@ -1985,6 +2096,7 @@ private void FilterPalette(string category)
         var ratio = _zoom / oldZoom;
 
         // Keep the point under the cursor stationary while scaling.
+        _gridLayer?.SetZoom(_zoom);
         _panTransform.X = p.X - (p.X - _panTransform.X) * ratio;
         _panTransform.Y = p.Y - (p.Y - _panTransform.Y) * ratio;
         _zoomTransform.ScaleX = _zoom;
@@ -2039,6 +2151,7 @@ private void FilterPalette(string category)
 
     private void Canvas_Drop(object? sender, DragEventArgs e)
     {
+        DisableHandMode();
         _dragOverCanvas = false;
         var item = _dragInFlight;
         if (_simulator.IsRunning || item is null || item.Kind is not ComponentKind kind)
@@ -2229,6 +2342,15 @@ private void FilterPalette(string category)
     {
         SchematicCanvas.Focus();
         _cursorPosition = GetWorldPosition(e);
+        if (_handMode || _spacePanning)
+        {
+            _panning = true;
+            _panLastPoint = e.GetPosition(Viewport);
+            CaptureCanvas();
+            Cursor = new Cursor(StandardCursorType.SizeAll);
+            e.Handled = true;
+            return;
+        }
         if (_isPlacingPaste)
         {
             CommitPastedPlacement(_cursorPosition);
@@ -2748,6 +2870,15 @@ private async void EditTimerComponent(ComponentModel timer)
     private void Canvas_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         _pointer = e.Pointer;
+        if (_panning && e.InitialPressMouseButton == MouseButton.Left)
+        {
+            _panning = false;
+            ReleaseCapture();
+            Cursor = new Cursor(_handMode || _spacePanning ? StandardCursorType.Hand : StandardCursorType.Arrow);
+            SaveCameraState();
+            e.Handled = true;
+            return;
+        }
         if (e.InitialPressMouseButton != MouseButton.Left) return;
         if (_movingWireId is not null)
         {
@@ -3322,6 +3453,24 @@ private async void EditTimerComponent(ComponentModel timer)
     private void Window_PreviewKeyDown(object? sender, KeyEventArgs e)
     {
         if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is TextBox or ComboBox) return;
+        if (e.Key == Key.Space)
+        {
+            if (!_spacePanning)
+            {
+                _spacePanning = true;
+                UpdateHandToolAppearance();
+                Cursor = new Cursor(StandardCursorType.Hand);
+            }
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.H && e.KeyModifiers == KeyModifiers.None)
+        {
+            HandTool_Click(null, null!);
+            e.Handled = true;
+            return;
+        }
 
         var ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
         if (e.Key == Key.S && ctrl)
@@ -3488,6 +3637,12 @@ private async void EditTimerComponent(ComponentModel timer)
 
     private void CancelTool()
     {
+        if (_handMode)
+        {
+            _handMode = false;
+            UpdateHandToolAppearance();
+            Cursor = new Cursor(StandardCursorType.Arrow);
+        }
         _isPlacingPaste = false;
         _placingKind = null; _wireMode = false; _wireStart = null;
         _wireWaypoints.Clear();
@@ -3685,6 +3840,8 @@ private void Redraw()
     {
         try
         {
+            _importWarningVisuals.Clear();
+            _importWarningRings.Clear();
             _currentFlowDots.Clear();
             _blinkingLampVisuals.Clear();
 
@@ -3832,6 +3989,17 @@ private void Redraw()
                 Canvas.SetTop(selectionShape, rect.Top);
                 SchematicCanvas.Children.Add(selectionShape);
             }
+            if (!_simulator.IsRunning && _activeTab is { CadImportUnconnectedTerminals.Count: > 0 })
+            {
+                PruneConnectedImportWarnings();
+                foreach (var (compId, termId) in _activeTab.CadImportUnconnectedTerminals)
+                {
+                    var comp = _project.Components.FirstOrDefault(c => c.Id == compId);
+                    if (comp is null) continue;
+                    var p = TerminalPosition(comp, termId);
+                    DrawUnconnectedTerminalWarning(p.X, p.Y);
+                }
+            }
             ApplyZoomToSchematicText(SchematicCanvas);
         }
         catch (Exception ex)
@@ -3856,15 +4024,18 @@ private void Redraw()
         return idleElementColor;
     }
 
+    
     private void DrawGrid()
-    {
-        var width = Math.Max(1500, double.IsNaN(SchematicCanvas.Width) ? 0 : SchematicCanvas.Width);
-        var height = Math.Max(1000, double.IsNaN(SchematicCanvas.Height) ? 0 : SchematicCanvas.Height);
-        var brush = Brush(_darkTheme ? "#303030" : "#E8EDF3");
-        SchematicCanvas.Children.Add(new GridLayer(width, height, brush, 0.65, GridSize));
-        var frame = new Rectangle { Width = width, Height = height, Stroke = Brush(_darkTheme ? "#8A8A8A" : "#334155"), StrokeThickness = 2, Fill = Brushes.Transparent, IsHitTestVisible = false };
-        Canvas.SetLeft(frame, 0); Canvas.SetTop(frame, 0); SchematicCanvas.Children.Add(frame);
-    }
+  {
+      var width = Math.Max(1500, double.IsNaN(SchematicCanvas.Width) ? 0 : SchematicCanvas.Width);
+      var height = Math.Max(1000, double.IsNaN(SchematicCanvas.Height) ? 0 : SchematicCanvas.Height);
+      var brush = Brush(_darkTheme ? "#454545" : "#CBD5E1");
+      _gridLayer = new GridLayer(width, height, brush, 0.65, GridSize);
+      _gridLayer.SetZoom(_zoom);
+      SchematicCanvas.Children.Add(_gridLayer);
+      var frame = new Rectangle { Width = width, Height = height, Stroke = Brush(_darkTheme ? "#8A8A8A" : "#334155"), StrokeThickness = 2, Fill = Brushes.Transparent, IsHitTestVisible = false };
+      Canvas.SetLeft(frame, 0); Canvas.SetTop(frame, 0); SchematicCanvas.Children.Add(frame);
+  }
 
     private static void AppendDistinctPoint(List<Point> points, Point point)
     {
@@ -4171,6 +4342,27 @@ private void Redraw()
         DrawTerminal(points[0].X, points[0].Y);
         DrawTerminal(points[^1].X, points[^1].Y);
     }
+    
+    private void AddUprightTerminalNumber(string number, Point terminalPos, bool placeLeft = false)
+    {
+        var label = new TextBlock
+        {
+            Text = number,
+            Foreground = _darkTheme ? Brushes.White : Brushes.Black,
+            FontSize = 9.5,
+            FontWeight = FontWeight.SemiBold,
+            Width = 16,
+            TextAlignment = placeLeft ? TextAlignment.Right : TextAlignment.Left,
+            RenderTransform = new ScaleTransform(1.05, 1.0),
+            RenderTransformOrigin = RelativePoint.TopLeft,
+            IsHitTestVisible = false
+        };
+        
+
+        Canvas.SetLeft(label, placeLeft ? terminalPos.X - 23 : terminalPos.X + 7);
+        Canvas.SetTop(label, terminalPos.Y - 6.5);
+        SchematicCanvas.Children.Add(label);
+    }
 
     private void DrawCurrentFlowDots(IReadOnlyList<Point> points, bool forward)
     {
@@ -4296,6 +4488,154 @@ private void Redraw()
         SchematicCanvas.Children.Add(new Line { StartPoint = new Point(x1, y1), EndPoint = new Point(x2, y2), Stroke = Brush(colorHex), StrokeThickness = thickness, StrokeDashArray = dash, Opacity = opacity, IsHitTestVisible = false });
     }
 
+    private static void PopulateCadImportUnconnectedTerminals(ProjectTab tab)
+    {
+        tab.CadImportUnconnectedTerminals.Clear();
+        var connected = new HashSet<(Guid ComponentId, string TerminalId)>();
+
+        foreach (var wire in tab.Project.Wires)
+        {
+            connected.Add((wire.StartComponentId, wire.StartTerminalId));
+            connected.Add((wire.EndComponentId, wire.EndTerminalId));
+        }
+
+        foreach (var comp in tab.Project.Components)
+        {
+            if (comp.Kind == ComponentKind.WireJunction) continue;
+            foreach (var term in ComponentTerminals.Get(comp))
+            {
+                if (!connected.Contains((comp.Id, term.Id)))
+                    tab.CadImportUnconnectedTerminals.Add((comp.Id, term.Id));
+            }
+        }
+    }
+
+    private void PruneConnectedImportWarnings()
+    {
+        if (_activeTab is null || _activeTab.CadImportUnconnectedTerminals.Count == 0) return;
+
+        var existingIds = _project.Components.Select(c => c.Id).ToHashSet();
+        var wired = new HashSet<(Guid ComponentId, string TerminalId)>();
+        foreach (var wire in _project.Wires)
+        {
+            wired.Add((wire.StartComponentId, wire.StartTerminalId));
+            wired.Add((wire.EndComponentId, wire.EndTerminalId));
+        }
+
+        _activeTab.CadImportUnconnectedTerminals.RemoveWhere(item =>
+            !existingIds.Contains(item.ComponentId) || wired.Contains(item));
+    }
+
+    private (double Opacity, double RingScale) GetImportWarningAnimationState()
+    {
+        if (_activeTab?.ImportWarningShownUtc is not DateTime startedAt)
+            return (0, 1);
+
+        var elapsed = (DateTime.UtcNow - startedAt).TotalSeconds;
+        const double holdSeconds = 5.0;
+        const double fadeSeconds = 1.2;
+
+        if (elapsed >= holdSeconds + fadeSeconds)
+            return (0, 1);
+
+        var fade = elapsed <= holdSeconds
+            ? 1.0
+            : Math.Clamp(1.0 - (elapsed - holdSeconds) / fadeSeconds, 0.0, 1.0);
+
+        var pulse = 0.5 + 0.5 * Math.Sin(elapsed * Math.PI * 2.6);
+        var opacity = (0.45 + 0.55 * pulse) * fade;
+        var ringScale = 0.95 + 0.30 * pulse;
+        return (opacity, ringScale);
+    }
+
+    private void UpdateImportWarningAnimation()
+    {
+        if (_activeTab is null ||
+            _activeTab.ImportWarningShownUtc is not DateTime startedAt ||
+            _activeTab.CadImportUnconnectedTerminals.Count == 0)
+        {
+            _importWarningTimer.Stop();
+            return;
+        }
+
+        var elapsed = (DateTime.UtcNow - startedAt).TotalSeconds;
+        if (elapsed >= 6.2)
+        {
+            _importWarningTimer.Stop();
+            _activeTab.CadImportUnconnectedTerminals.Clear();
+            _activeTab.ImportWarningShownUtc = null;
+            Redraw();
+            return;
+        }
+
+        var (opacity, ringScale) = GetImportWarningAnimationState();
+        foreach (var visual in _importWarningVisuals)
+            visual.Opacity = opacity;
+
+        foreach (var ring in _importWarningRings)
+        {
+            if (ring.RenderTransform is ScaleTransform st)
+            {
+                st.ScaleX = ringScale;
+                st.ScaleY = ringScale;
+            }
+        }
+    }
+
+    private void DrawUnconnectedTerminalWarning(double x, double y)
+    {
+        var (opacity, ringScale) = GetImportWarningAnimationState();
+
+        var ring = new Ellipse
+        {
+            Width = 13,
+            Height = 13,
+            Stroke = Brush("#F59E0B"),
+            StrokeThickness = 1.6,
+            Fill = Brushes.Transparent,
+            Opacity = opacity,
+            RenderTransform = new ScaleTransform(ringScale, ringScale),
+            RenderTransformOrigin = RelativePoint.Center,
+            IsHitTestVisible = false
+        };
+        Canvas.SetLeft(ring, x - 6.5);
+        Canvas.SetTop(ring, y - 6.5);
+        SchematicCanvas.Children.Add(ring);
+        _importWarningVisuals.Add(ring);
+        _importWarningRings.Add(ring);
+
+        var badge = new Ellipse
+        {
+            Width = 11,
+            Height = 11,
+            Fill = Brush("#F59E0B"),
+            Stroke = Brush("#78350F"),
+            StrokeThickness = 0.8,
+            Opacity = opacity,
+            IsHitTestVisible = false
+        };
+        Canvas.SetLeft(badge, x + 5);
+        Canvas.SetTop(badge, y - 14);
+        SchematicCanvas.Children.Add(badge);
+        _importWarningVisuals.Add(badge);
+
+        var mark = new TextBlock
+        {
+            Text = "!",
+            Foreground = Brushes.White,
+            FontSize = 8.5,
+            FontWeight = FontWeight.Bold,
+            Width = 11,
+            TextAlignment = TextAlignment.Center,
+            Opacity = opacity,
+            Tag = "NoZoom",
+            IsHitTestVisible = false
+        };
+        Canvas.SetLeft(mark, x + 5);
+        Canvas.SetTop(mark, y - 14.5);
+        SchematicCanvas.Children.Add(mark);
+        _importWarningVisuals.Add(mark);
+    }
     private void DrawTerminal(double x, double y, bool highlight = false)
     {
         if (highlight)
@@ -4650,6 +4990,7 @@ private void Redraw()
              break;
             case ComponentKind.CircuitBreaker:
             case ComponentKind.Fuse:
+                AddLeftSideLabel(c, c.Tag, 13, 9);
                 AddLine(group, 50, 2, 50, 62, stroke, 2);
 
                 group.Children.Add(new Rectangle
@@ -4668,7 +5009,7 @@ private void Redraw()
                 AddTerminalNumber(group, "1", 37, 2, stroke);
                 AddTerminalNumber(group, "2", 37, 52, stroke);
 
-                AddCanvasLabel(c.Tag, c.X + 16, c.Y - 5, 9);
+                AddRotatedLabel(c, c.Tag, 16, -5, 9);
                 break;
             case ComponentKind.DifferentialBreaker:
                 AddLine(group, 10, 28, 34, 28, stroke, 2);
@@ -4844,9 +5185,8 @@ private void Redraw()
 
         var symbolScaleX = c.Kind switch
         {
-            ComponentKind.Rcd3PN => ComponentTerminals.PoleSpacing / 32.0,
-            ComponentKind.ThermalRelay or ComponentKind.Contactor2P or ComponentKind.Contactor3P or ComponentKind.Contactor4P => 1.0,
-            ComponentKind.Breaker1P or ComponentKind.Breaker1PN or ComponentKind.Breaker2P or ComponentKind.Breaker3P or ComponentKind.Breaker3PN or ComponentKind.Rcd1PN or ComponentKind.SurgeProtector1P or ComponentKind.SurgeProtector3PN => ComponentTerminals.PoleSpacing / 50.0,
+            ComponentKind.ThermalRelay or ComponentKind.Contactor2P or ComponentKind.Contactor3P or ComponentKind.Contactor4P or ComponentKind.Rcd1PN or ComponentKind.Rcd3PN => 1.0,
+            ComponentKind.Breaker1P or ComponentKind.Breaker1PN or ComponentKind.Breaker2P or ComponentKind.Breaker3P or ComponentKind.Breaker3PN or ComponentKind.SurgeProtector1P or ComponentKind.SurgeProtector3PN => ComponentTerminals.PoleSpacing / 50.0,
             _ => 1.0
         };
         var symbolTransform = new TransformGroup();
@@ -4872,48 +5212,69 @@ private void Redraw()
             };
             var poleSpacing = ComponentTerminals.PoleSpacing;
             var lastPoleCenter = 50 + poleSpacing * (poleCount - 1) / 2;
-            if (c.Kind is not (ComponentKind.ThermalRelay or ComponentKind.Contactor2P or ComponentKind.Contactor3P or ComponentKind.Contactor4P))
-                    AddCanvasLabel(c.Tag, c.X + (poleCount == 1 ? 27 : lastPoleCenter - 50 + 24), c.Y - 8, 9);
-                else if (c.Kind is ComponentKind.TimerOnContactNO or ComponentKind.TimerOnContactNC or ComponentKind.TimerOffContactNO or ComponentKind.TimerOffContactNC)
-                    AddCanvasLabel(c.Tag, c.X + 22, c.Y - 8, 9);
-                else if (c.Kind == ComponentKind.TimerOnOffContactNO_NC)
-                     AddCanvasLabel(c.Tag, c.X + 36, c.Y - 8, 9);
+            var leftDist = c.Kind switch
+            {
+                ComponentKind.Breaker1P => 44.0,
+                ComponentKind.Breaker1PN or ComponentKind.Breaker2P or ComponentKind.Rcd1PN => 52.0,
+                ComponentKind.Breaker3P => 62.0,
+                ComponentKind.Breaker3PN or ComponentKind.Rcd3PN => 72.0,
+                ComponentKind.ThermalRelay => 48.0,
+                _ => poleSpacing * (poleCount - 1) / 2.0 + 16.0 // Contactor2P/3P/4P
+            };
+            var labelText = c.Kind is ComponentKind.ThermalRelay or ComponentKind.Contactor2P or ComponentKind.Contactor3P or ComponentKind.Contactor4P
+                ? (c.Tag.StartsWith('-') ? c.Tag : $"-{c.Tag}")
+                : c.Tag;
+            AddLeftSideLabel(c, labelText, leftDist, 9);
+
             for (var pole = 0; pole < poleCount; pole++)
             {
-                var x = 50 - poleSpacing * (poleCount - 1) / 2 + poleSpacing * pole;
-                var worldX = c.X + x - 50;
-                AddCanvasLabel((pole * 2 + 1).ToString(), worldX + 5, c.Y - 35, 8);
-                AddCanvasLabel((pole * 2 + 2).ToString(), worldX + 5, c.Y + 25, 8);
+                var isContactor = c.Kind is ComponentKind.Contactor2P or ComponentKind.Contactor3P or ComponentKind.Contactor4P;
+                var inTermId = isContactor ? $"P{pole + 1}in" : pole == 0 ? "Lin" : pole == 1 ? "Nin" : $"L{pole + 1}in";
+                var outTermId = isContactor ? $"P{pole + 1}out" : pole == 0 ? "Lout" : pole == 1 ? "Nout" : $"L{pole + 1}out";
+
+                if (c.Kind == ComponentKind.Breaker1P)
+                {
+                    inTermId = "L";
+                    outTermId = "R";
+                }
+
+                var pIn = TerminalPosition(c, inTermId);
+                var pOut = TerminalPosition(c, outTermId);
+
+                var isHorizontal = c.Rotation % 180 != 0;
+                AddUprightTerminalNumber((pole * 2 + 1).ToString(), pIn, isHorizontal && pIn.X < c.X);
+                AddUprightTerminalNumber((pole * 2 + 2).ToString(), pOut, isHorizontal && pOut.X < c.X);
             }
         }
-        if (c.Kind is ComponentKind.AuxContactNO_NC or ComponentKind.OverloadNO or ComponentKind.ThermalRelayAuxNC or ComponentKind.ThermalRelayAuxNO_NC)
-            AddCanvasLabel($"-{c.Tag}", c.X - (c.Kind == ComponentKind.ThermalRelayAuxNO_NC ? 46 : 49),
-                c.Y + (c.Kind == ComponentKind.ThermalRelayAuxNO_NC ? 5 : -5), 9);
-        else if (c.Kind is ComponentKind.ConContact or ComponentKind.PushButtonCon or ComponentKind.ToggleSwitchCon)
-            AddCanvasLabel(c.Tag, c.X + 30, c.Y - 5, 9);
-        else if (c.Kind is ComponentKind.ToggleSwitchNO or ComponentKind.ToggleSwitchNC or ComponentKind.ToggleSwitchNO_NC)
-            AddCanvasLabel(c.Tag, c.X + (c.Kind == ComponentKind.ToggleSwitchNO_NC ? 43 : 25), c.Y - 25, 9);
-        else if (c.Kind == ComponentKind.CrossoverSwitch)
-            AddCanvasLabel(c.Tag, c.X + 30, c.Y - 5, 9);
-        else if (c.Kind == ComponentKind.PushButtonNO_NC)
-            AddCanvasLabel(c.Tag, c.X + 25, c.Y - 8, 9);
-        else if (c.Kind is ComponentKind.PushButtonNO or ComponentKind.PushButtonNC or ComponentKind.ToggleSwitchNO or ComponentKind.ToggleSwitchNC or ComponentKind.AuxContactNO or ComponentKind.AuxContactNC or ComponentKind.AuxContactNO_NC or ComponentKind.OverloadNC)
-            AddCanvasLabel(c.Tag, c.X + 19, c.Y - 8, 9);
-        else if (c.Kind is ComponentKind.TimerOnContactNO or ComponentKind.TimerOnContactNC or ComponentKind.TimerOffContactNO or ComponentKind.TimerOffContactNC)
-            AddCanvasLabel(c.Tag, c.X + 28, c.Y - 8, 9);
-        else if (c.Kind == ComponentKind.TimerOnOffContactNO_NC)
-            AddCanvasLabel(c.Tag, c.X + 36, c.Y - 8, 9);
-
-        if (c.Kind is ComponentKind.Lamp or ComponentKind.BlinkingLamp or ComponentKind.Bell or ComponentKind.Siren)
-            AddCanvasLabel(c.Tag, c.X - 32, c.Y - 5, 12);
-        if (c.Kind == ComponentKind.DcMotor)
-            AddCanvasLabel(c.Tag, c.X - 3, c.Y + 20, 9);
-        else if (c.Kind is ComponentKind.AcMotor or ComponentKind.AcMotor1P)
-            AddCanvasLabel(c.Tag, c.X - 44, c.Y - 4, 9);
+        if (c.Kind is ComponentKind.ThermalRelayAuxNO_NC)
+            AddLeftSideLabel(c, $"-{c.Tag}", 50, 9);
+        else if (c.Kind is ComponentKind.OverloadNO or ComponentKind.ThermalRelayAuxNC)
+            AddLeftSideLabel(c, $"-{c.Tag}", 32, 9);
+        else if (c.Kind is ComponentKind.AuxContactNO_NC or ComponentKind.ToggleSwitchNO_NC or ComponentKind.TimerOnOffContactNO_NC)
+            AddLeftSideLabel(c, c.Tag, 38, 9);
+        else if (c.Kind is ComponentKind.TimerOnContactNO or ComponentKind.TimerOnContactNC)
+            AddLeftSideLabel(c, c.Tag, 30, 9);
+        else if (c.Kind is ComponentKind.PushButtonNO or ComponentKind.PushButtonNC or ComponentKind.PushButtonNO_NC or ComponentKind.PushButtonCon
+            or ComponentKind.LimitSwitchNO or ComponentKind.LimitSwitchNC or ComponentKind.CrossoverSwitch)
+            AddLeftSideLabel(c, c.Tag, 48, 9);
+        else if (c.Kind is ComponentKind.ToggleSwitchNO or ComponentKind.ToggleSwitchNC or ComponentKind.ToggleSwitchCon
+            or ComponentKind.AuxContactNO or ComponentKind.AuxContactNC or ComponentKind.ConContact or ComponentKind.OverloadNC
+            or ComponentKind.TimerOffContactNO or ComponentKind.TimerOffContactNC)
+            AddLeftSideLabel(c, c.Tag, 18, 9);
+        else if (c.Kind is ComponentKind.Lamp or ComponentKind.BlinkingLamp or ComponentKind.Bell or ComponentKind.Siren)
+            AddLeftSideLabel(c, c.Tag, 22, 11);
+        else if (c.Kind is ComponentKind.DcMotor or ComponentKind.AcMotor or ComponentKind.AcMotor1P)
+            AddLeftSideLabel(c, c.Tag, 25, 9);
         else if (c.Kind == ComponentKind.Coil)
-            AddCanvasLabel(c.Tag, c.X + 24, c.Y - 24, 9);
+            AddLeftSideLabel(c, c.Tag, 22, 9);
         else if (c.Kind is ComponentKind.TimerOnDelay or ComponentKind.TimerOffDelay or ComponentKind.TimerOnOffDelay)
-            AddCanvasLabel(c.Tag, c.X - 48, c.Y - 7, 9);
+            AddLeftSideLabel(c, c.Tag, 32, 9);
+        else if (c.Kind is ComponentKind.PushButtonNO_NC or ComponentKind.LimitSwitchNO or ComponentKind.LimitSwitchNC)
+            AddLeftSideLabel(c, c.Tag, 56, 9);
+        else if (c.Kind is ComponentKind.PushButtonNO or ComponentKind.PushButtonNC or ComponentKind.PushButtonCon)
+            AddLeftSideLabel(c, c.Tag, 44, 9);
+        else if (c.Kind == ComponentKind.CrossoverSwitch)
+            AddLeftSideLabel(c, c.Tag, 48, 9);
         foreach (var terminal in ComponentTerminals.Get(c))
         {
             var p = TerminalPosition(c, terminal.Id);
@@ -4930,6 +5291,68 @@ private void Redraw()
     {
         var label = new TextBlock { Text = text, FontSize = FontSizeForZoom(fontSize), Foreground = _darkTheme ? Brushes.White : Brushes.Black, IsHitTestVisible = false };
         Canvas.SetLeft(label, x); Canvas.SetTop(label, y); SchematicCanvas.Children.Add(label);
+    }
+
+    private void AddLeftSideLabel(ComponentModel c, string text, double leftEdgeDistance, double fontSize)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+
+        const double boxW = 72.0;
+        const double halfH = 6.5;
+        var angle = ((c.Rotation % 360) + 360) % 360;
+
+        var label = new TextBlock
+        {
+            Text = text,
+            FontSize = FontSizeForZoom(fontSize),
+            Foreground = _darkTheme ? Brushes.White : Brushes.Black,
+            Width = boxW,
+            IsHitTestVisible = false
+        };
+
+        switch (angle)
+        {
+            case 90:
+                label.TextAlignment = TextAlignment.Center;
+                Canvas.SetLeft(label, c.X - boxW / 2.0);
+                Canvas.SetTop(label, c.Y + leftEdgeDistance);
+                break;
+            case 180:
+                label.TextAlignment = TextAlignment.Left;
+                Canvas.SetLeft(label, c.X + leftEdgeDistance);
+                Canvas.SetTop(label, c.Y - halfH);
+                break;
+            case 270:
+                label.TextAlignment = TextAlignment.Center;
+                Canvas.SetLeft(label, c.X - boxW / 2.0);
+                Canvas.SetTop(label, c.Y - leftEdgeDistance - halfH * 2);
+                break;
+            default:
+                label.TextAlignment = TextAlignment.Right;
+                Canvas.SetLeft(label, c.X - leftEdgeDistance - boxW);
+                Canvas.SetTop(label, c.Y - halfH);
+                break;
+        }
+
+        SchematicCanvas.Children.Add(label);
+    }
+
+    private void AddRotatedLabel(ComponentModel c, string text, double localOffsetX, double localOffsetY, double fontSize)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+
+        // Примерный полуразмер текста, чтобы вращать вокруг центра самой надписи
+        var halfW = Math.Max(4.0, text.Length * fontSize * 0.3);
+        const double halfH = 6.0;
+
+        var cx = localOffsetX + halfW;
+        var cy = localOffsetY + halfH;
+
+        var rad = ((c.Rotation % 360) + 360) % 360 * Math.PI / 180.0;
+        var rx = cx * Math.Cos(rad) - cy * Math.Sin(rad);
+        var ry = cx * Math.Sin(rad) + cy * Math.Cos(rad);
+
+        AddCanvasLabel(text, c.X + rx - halfW, c.Y + ry - halfH, fontSize);
     }
 
     
@@ -4954,13 +5377,8 @@ private void ApplyZoomToSchematicText(Panel panel)
                 text.DataContext = baseFontSize;
             }
 
-            var screenSize = Math.Clamp(
-                baseFontSize * Math.Pow(_zoom, -0.03),
-                9,
-                20
-            );
-
-            text.FontSize = screenSize / Math.Max(0.01, _zoom);
+            var zoomFactor = Math.Clamp(Math.Pow(_zoom, -0.25), 0.78, 1.32);
+            text.FontSize = baseFontSize * zoomFactor;
         }
         else if (child is Panel nestedPanel)
         {
@@ -5028,6 +5446,7 @@ private void ApplyZoomToSchematicText(Panel panel)
     private void DrawMultiPoleDevice(Canvas group, ComponentKind kind, IBrush stroke, bool closed, string tag,
         IReadOnlySet<int>? conductingPoles = null)
     {
+        
         if (kind is ComponentKind.Contactor2P or ComponentKind.Contactor3P or ComponentKind.Contactor4P)
         {
             var poles = kind == ComponentKind.Contactor2P ? 2 : kind == ComponentKind.Contactor3P ? 3 : 4;
@@ -5036,22 +5455,18 @@ private void ApplyZoomToSchematicText(Panel panel)
 
             // Mechanical link and main poles share the same open-contact shape
             // for all pole counts; the coil with the matching tag closes them.
-            for (var pair = 0; pair < poles - 1; pair++)
+            var bladeMidOffset = closed ? 3.0 : -4.0;
+            var firstBladeMidX = contactorFirstX + bladeMidOffset;
+            var lastBladeMidX = contactorFirstX + contactorSpacing * (poles - 1) + bladeMidOffset;
+            group.Children.Add(new Line
             {
-                var pairFirstX = contactorFirstX + contactorSpacing * pair;
-                var pairLastX = pairFirstX + contactorSpacing;
-                var linkShift = closed ? 6.0 : 0.0;
-                group.Children.Add(new Line { StartPoint = new Point(pairFirstX - 4 + linkShift, 32), EndPoint = new Point(pairLastX - 25 + linkShift, 32), Stroke = stroke, StrokeThickness = 1 });
-                group.Children.Add(new Line { StartPoint = new Point(pairFirstX + 15 + linkShift, 32), EndPoint = new Point(pairLastX - 4 + linkShift, 32), Stroke = stroke, StrokeThickness = 1 });
-            }
-            group.Children.Add(new TextBlock
-            {
-                Text = tag.StartsWith('-') ? tag : $"-{tag}",
-                Foreground = _darkTheme ? Brushes.White : Brushes.Black,
-                FontSize = FontSizeForZoom(8)
+                StartPoint = new Point(firstBladeMidX, 32),
+                EndPoint = new Point(lastBladeMidX, 32),
+                Stroke = stroke,
+                StrokeThickness = 1.3,
+                StrokeDashArray = new DoubleCollection { 3.5, 2.5 },
+                IsHitTestVisible = false
             });
-            Canvas.SetLeft(group.Children[^1], contactorFirstX - 32);
-            Canvas.SetTop(group.Children[^1], 26);
 
             for (var pole = 0; pole < poles; pole++)
             {
@@ -5060,6 +5475,7 @@ private void ApplyZoomToSchematicText(Panel panel)
                 AddLine(group, x, 2, x, 20, contactStroke, 1.5);
                 DrawSwitchBlade(group, x, 20, 44, contactStroke, closed, 8, 1.5);
                 AddLine(group, x, 44, x, 62, contactStroke, 1.5);
+                
             }
             return;
         }
@@ -5075,15 +5491,6 @@ private void ApplyZoomToSchematicText(Panel panel)
             const double housingLeft = 19;
             const double housingWidth = 67;
 
-            var relayDesignation = tag.StartsWith('-') ? tag : $"-{tag}";
-            group.Children.Add(new TextBlock
-            {
-                Text = relayDesignation,
-                Foreground = stroke,
-                FontSize = FontSizeForZoom(8)
-            });
-            Canvas.SetLeft(group.Children[^1], -15);
-            Canvas.SetTop(group.Children[^1], 24);
             AddLine(group, 6, 32, housingLeft, 32, stroke, 1.4);
 
             group.Children.Add(new Rectangle
@@ -5122,86 +5529,88 @@ private void ApplyZoomToSchematicText(Panel panel)
 
         if (kind == ComponentKind.Rcd3PN)
         {
-            // Four-pole RCD follows the same IEC-style symbol as the 1P+N
-            // version: thermal detector at the left, linked knife contacts,
-            // straight lower terminals, and one shared differential core.
-            const double rcdPoleSpacing = 32;
+            var rcdPoleSpacing = ComponentTerminals.PoleSpacing; // 20 px
             const int poleCount = 4;
-            var rcdFirstX = 50 - rcdPoleSpacing * (poleCount - 1) / 2;
+            var rcdFirstX = 50 - rcdPoleSpacing * (poleCount - 1) / 2; // 20, 40, 60, 80
 
-            var rcdDetectorX = rcdFirstX - 41;
-            AddLine(group, rcdDetectorX - 6, 0, rcdDetectorX - 6, 29, stroke, 1.5);
-            AddLine(group, rcdDetectorX - 6, 14, rcdDetectorX, 14, stroke, 1.2);
-            group.Children.Add(new Rectangle { Width = 22, Height = 15, Stroke = stroke, StrokeThickness = 1.2 });
-            Canvas.SetLeft(group.Children[^1], rcdDetectorX); Canvas.SetTop(group.Children[^1], 7);
-            AddLine(group, rcdDetectorX + 11, 7, rcdDetectorX + 11, 22, stroke, 1.0);
-            AddLine(group, rcdDetectorX, 14.5, rcdDetectorX + 22, 14.5, stroke, 1.0);
-            AddLine(group, rcdDetectorX + 22, 14, rcdFirstX, 14, stroke, 1.2);
-            AddLine(group, rcdDetectorX + 11, 22, rcdDetectorX + 11, 27, stroke, 1.2);
-            AddLine(group, rcdDetectorX + 11, 27, rcdDetectorX + 19, 27, stroke, 1.2);
+            // Сдвинули квадрат влево (-30 вместо -24)
+            var rcdDetectorX = rcdFirstX - 30;
+            AddLine(group, rcdDetectorX - 5, 2, rcdDetectorX - 5, 29, stroke, 1.5);
+            AddLine(group, rcdDetectorX - 5, 16, rcdDetectorX, 16, stroke, 1.2);
+            group.Children.Add(new Rectangle { Width = 14, Height = 14, Stroke = stroke, StrokeThickness = 1.2 });
+            Canvas.SetLeft(group.Children[^1], rcdDetectorX); Canvas.SetTop(group.Children[^1], 9);
+            AddLine(group, rcdDetectorX + 7, 9, rcdDetectorX + 7, 23, stroke, 1.0);
+            AddLine(group, rcdDetectorX, 16, rcdDetectorX + 14, 16, stroke, 1.0);
+            AddLine(group, rcdDetectorX + 14, 16, rcdFirstX, 16, stroke, 1.2);
+            AddLine(group, rcdDetectorX + 7, 23, rcdDetectorX + 7, 28, stroke, 1.2);
+            AddLine(group, rcdDetectorX + 7, 28, rcdDetectorX + 12, 28, stroke, 1.2);
 
             for (var pole = 0; pole < poleCount; pole++)
             {
                 var x = rcdFirstX + rcdPoleSpacing * pole;
-                AddLine(group, x, 0, x, 17, stroke, 1.5);
-                DrawSwitchBlade(group, x, 17, 50, stroke, closed, 12, 1.5);
-                AddLine(group, x, 50, x, 64, stroke, 1.5);
+                AddLine(group, x, 2, x, 19, stroke, 1.5);
+                if (closed)
+                    DrawSwitchBlade(group, x, 19, 48, stroke, true, 8, 1.5);
+                else
+                    AddLine(group, x - 8, 25, x, 48, stroke, 1.5); // укороченная косая линия
+                AddLine(group, x, 48, x, 62, stroke, 1.5);
             }
 
             group.Children.Add(new Ellipse
             {
                 Width = rcdPoleSpacing * (poleCount - 1) + 12,
-                Height = 14,
+                Height = 12,
                 Stroke = stroke,
                 StrokeThickness = 1.1,
                 Fill = Brushes.Transparent
             });
             Canvas.SetLeft(group.Children[^1], rcdFirstX - 6);
             Canvas.SetTop(group.Children[^1], 42);
-            group.Children.Add(new TextBlock { Text = "L", Foreground = stroke, FontSize = 7 });
-            Canvas.SetLeft(group.Children[^1], rcdFirstX - 29);
-            Canvas.SetTop(group.Children[^1], 41);
+
+            // Буква L строго по центру квадрата
+            group.Children.Add(new TextBlock { Text = "L", Foreground = stroke, FontSize = 9, Width = 14, TextAlignment = TextAlignment.Center });
+            Canvas.SetLeft(group.Children[^1], rcdDetectorX);
+            Canvas.SetTop(group.Children[^1], 40);
             return;
         }
 
         if (kind == ComponentKind.Rcd1PN)
         {
-            // Layout follows the hand sketch: left thermal unit, two open
-            // contacts above a shared oval core and straight lower terminals.
-            AddLine(group, -22, 0, -22, 29, stroke, 1.5);
-            AddLine(group, -22, 14, -16, 14, stroke, 1.2);
-            group.Children.Add(new Rectangle { Width = 22, Height = 15, Stroke = stroke, StrokeThickness = 1.2 });
-            Canvas.SetLeft(group.Children[^1], -16); Canvas.SetTop(group.Children[^1], 7);
-            AddLine(group, -5, 7, -5, 22, stroke, 1.0);
-            AddLine(group, -16, 14.5, 6, 14.5, stroke, 1.0);
-            // Restore the connector removed in the previous edit.
-            AddLine(group, 6, 14, 25, 14, stroke, 1.2);
-            // Keep the under-block elbow at its original centered position.
-            AddLine(group, -5, 22, -5, 27, stroke, 1.2);
-            AddLine(group, -5, 27, 3, 27, stroke, 1.2);
+            AddLine(group, 4, 2, 4, 29, stroke, 1.5);
+            AddLine(group, 4, 16, 9, 16, stroke, 1.2);
+            group.Children.Add(new Rectangle { Width = 14, Height = 14, Stroke = stroke, StrokeThickness = 1.2 });
+            Canvas.SetLeft(group.Children[^1], 9); Canvas.SetTop(group.Children[^1], 9);
+            AddLine(group, 16, 9, 16, 23, stroke, 1.0);
+            AddLine(group, 9, 16, 23, 16, stroke, 1.0);
+            AddLine(group, 23, 16, 40, 16, stroke, 1.2);
+            AddLine(group, 16, 23, 16, 28, stroke, 1.2);
+            AddLine(group, 16, 28, 22, 28, stroke, 1.2);
 
-            // Top terminal stubs, separated open blades and vertical lower legs.
-            AddLine(group, 25, 0, 25, 17, stroke, 1.5);
-            DrawSwitchBlade(group, 25, 17, 50, stroke, closed, 12, 1.5);
-            AddLine(group, 25, 50, 25, 64, stroke, 1.5);
-            AddLine(group, 75, 0, 75, 17, stroke, 1.5);
-            DrawSwitchBlade(group, 75, 17, 50, stroke, closed, 12, 1.5);
-            AddLine(group, 75, 50, 75, 64, stroke, 1.5);
+            foreach (var x in new[] { 40.0, 60.0 })
+            {
+                AddLine(group, x, 2, x, 19, stroke, 1.5);
+                if (closed)
+                    DrawSwitchBlade(group, x, 19, 48, stroke, true, 8, 1.5);
+                else
+                    AddLine(group, x - 8, 25, x, 48, stroke, 1.5); // укороченная косая линия
+                AddLine(group, x, 48, x, 62, stroke, 1.5);
+            }
 
-            group.Children.Add(new Ellipse { Width = 60, Height = 14, Stroke = stroke, StrokeThickness = 1.1, Fill = Brushes.Transparent });
-            Canvas.SetLeft(group.Children[^1], 20); Canvas.SetTop(group.Children[^1], 42);
-            group.Children.Add(new TextBlock { Text = "L", Foreground = stroke, FontSize = 7 });
-            Canvas.SetLeft(group.Children[^1], -4); Canvas.SetTop(group.Children[^1], 41);
+            group.Children.Add(new Ellipse { Width = 32, Height = 12, Stroke = stroke, StrokeThickness = 1.1, Fill = Brushes.Transparent });
+            Canvas.SetLeft(group.Children[^1], 34); Canvas.SetTop(group.Children[^1], 42);
+
+            // Буква L строго по центру квадрата (Left = 9, Width = 14)
+            group.Children.Add(new TextBlock { Text = "L", Foreground = stroke, FontSize = 9, Width = 14, TextAlignment = TextAlignment.Center });
+            Canvas.SetLeft(group.Children[^1], 9);
+            Canvas.SetTop(group.Children[^1], 40);
             return;
         }
         if (kind == ComponentKind.Breaker1P)
         {
-            AddLine(group, 50, 2, 50, 16, stroke, 2);
-            DrawSwitchBlade(group, 50, 17, 50, stroke, closed, 7, 1.7);
-            // Moving contact is physically continuous with the straight lower terminal.
-            AddLine(group, 50, 48, 50, 62, stroke, 2);
-            // Thermal trip, magnetic arrow and both links meet the blade exactly.
-            DrawBreakerReleaseGlyph(group, 50, closed, 7, stroke);
+            AddLine(group, 50, 2, 50, 17, stroke, 1.7);
+            DrawSwitchBlade(group, 50, 17, 50, stroke, closed, 10, 1.7);
+            AddLine(group, 50, 50, 50, 62, stroke, 1.7);
+            DrawBreakerReleaseGlyph(group, 50, closed, 10, stroke);
             return;
         }
         var count = kind switch
@@ -5236,6 +5645,7 @@ private void ApplyZoomToSchematicText(Panel panel)
         }
         for (var i = 0; i < count; i++)
         {
+            
             var x = firstX + i * spacing;
             AddLine(group, x, 0, x, 17, stroke, 1.7);
             if (isSurge)
@@ -5256,13 +5666,11 @@ private void ApplyZoomToSchematicText(Panel panel)
             }
             else
             {
-                DrawSwitchBlade(group, x, 17, 50, stroke, closed, 7, 1.7);
+                DrawSwitchBlade(group, x, 17, 50, stroke, closed, 10, 1.7);
                 var neutralPole = i == count - 1 && kind is ComponentKind.Breaker1PN or ComponentKind.Breaker3PN;
                 if (isMultiBreaker && !neutralPole)
                 {
-                    // Repeat the complete 1P breaker glyph in every pole: stepped
-                    // thermal release, magnetic triangle and its connecting arm.
-                    DrawBreakerReleaseGlyph(group, x, closed, 7, stroke);
+                    DrawBreakerReleaseGlyph(group, x, closed, 10, stroke);
                 }
             }
             if (!isThermal) AddLine(group, x, 50, x, 64, stroke, 1.7);
@@ -5274,46 +5682,49 @@ private void ApplyZoomToSchematicText(Panel panel)
     {
         if (closed)
         {
-            AddLine(group, x, upperY, x + 6, upperY, stroke, thickness);
-            AddLine(group, x + 6, upperY, x, lowerY, stroke, thickness);
+            var topY = upperY - 3.0;
+            var topX = x - 7.0 * ((lowerY - topY) / (lowerY - upperY));
+            AddLine(group, x - 7, upperY, x, upperY, stroke, thickness);
+            AddLine(group, topX, topY, x, lowerY, stroke, thickness);
         }
         else
-            AddLine(group, x - openOffset, upperY, x, lowerY, stroke, thickness);
+        {
+            AddLine(group, x - openOffset, upperY + 3, x, lowerY, stroke, thickness);
+        }
     }
 
     private static void DrawBreakerReleaseGlyph(Canvas group, double x, bool closed, double openOffset, IBrush stroke)
     {
-        // The closed blade has a short horizontal section at its top; its
-        // slanted section therefore starts at x + 6. The open blade starts at
-        // x - openOffset. Intersect each release link with that actual slant.
-        double BladeXAt(double y)
-        {
-            var bladeTopX = closed ? x + 6 : x - openOffset;
-            return bladeTopX + (x - bladeTopX) * ((y - 17) / (50 - 17));
-        }
+        var openTripX = x - openOffset * ((50.0 - 28.0) / (50.0 - 20.0));
+        var openMagnetX = x - openOffset * ((50.0 - 37.0) / (50.0 - 20.0));
+        var closedTripX = x - 7.0 * ((50.0 - 28.0) / (50.0 - 17.0));
+        var closedMagnetX = x - 7.0 * ((50.0 - 37.0) / (50.0 - 17.0));
 
-        var bladeAtTrip = BladeXAt(28);
-        var bladeAtMagnet = BladeXAt(37);
-        var linkageShift = closed ? 4.0 : 0.0;
+        var tripX = closed ? closedTripX : openTripX;
+        var magnetX = closed ? closedMagnetX : openMagnetX;
+        var shift = closed ? ((closedTripX - openTripX) + (closedMagnetX - openMagnetX)) / 2.0 : 0.0;
+
         group.Children.Add(new Polyline
         {
             Points = new PointCollection
             {
-                new(x - 40 + linkageShift, 41), new(x - 28 + linkageShift, 37), new(x - 31 + linkageShift, 28),
-                new(x - 19 + linkageShift, 24), new(x - 16 + linkageShift, 32), new(bladeAtTrip, 28)
+                new(x - 45 + shift, 41), new(x - 33 + shift, 37), new(x - 36 + shift, 28),
+                new(x - 24 + shift, 24), new(x - 21 + shift, 32), new(tripX, 28)
             },
             Stroke = stroke, StrokeThickness = 1.5
         });
-        // Keep the original curve and arrow shape, with each endpoint placed
-        // directly on the blade. No separate connector segments are needed.
-        group.Children.Add(new Line { StartPoint = new Point(x - 30 + linkageShift, 46), EndPoint = new Point(bladeAtMagnet, 37), Stroke = stroke, StrokeThickness = 1.5 });
+        group.Children.Add(new Line
+        {
+            StartPoint = new Point(x - 35 + shift, 46),
+            EndPoint = new Point(magnetX, 37),
+            Stroke = stroke, StrokeThickness = 1.5
+        });
         group.Children.Add(new Polygon
         {
-            Points = new PointCollection { new(x - 36 + linkageShift, 49), new(x - 31 + linkageShift, 42), new(x - 28 + linkageShift, 50) },
+            Points = new PointCollection { new(x - 41 + shift, 49), new(x - 36 + shift, 42), new(x - 33 + shift, 50) },
             Fill = stroke, Stroke = stroke, StrokeThickness = 0.8
         });
     }
-
     private void BackToSubcategories_Click(object? sender, RoutedEventArgs e)
     {
         if (!string.IsNullOrEmpty(_activeCategory))
@@ -5405,9 +5816,16 @@ private void ApplyZoomToSchematicText(Panel panel)
 
         if (isPushButton && drawActuator)
         {
-            // Pressing the button nudges the dashed actuator toward the contact.
             var actuatorShift = isPressed ? 3.0 : 0.0;
-            group.Children.Add(new Line { StartPoint = new Point(14 + actuatorShift, 28), EndPoint = new Point(43 + actuatorShift, 28), Stroke = stroke, StrokeThickness = 1.7, StrokeDashArray = new DoubleCollection { 3.0, 2.2 }, IsHitTestVisible = false });
+            group.Children.Add(new Line
+            {
+                StartPoint = new Point(26 + actuatorShift, 28),
+                EndPoint = new Point(43 + actuatorShift, 28),
+                Stroke = stroke,
+                StrokeThickness = 1.7,
+                StrokeDashArray = new DoubleCollection { 3.0, 3.0 },
+                IsHitTestVisible = false
+            });
 
             var eLabel = new TextBlock
             {
@@ -5417,7 +5835,7 @@ private void ApplyZoomToSchematicText(Panel panel)
                 FontStyle = FontStyle.Italic,
                 Tag = "NoZoom"
             };
-            Canvas.SetLeft(eLabel, 4 + actuatorShift);
+            Canvas.SetLeft(eLabel, 15 + actuatorShift);
             Canvas.SetTop(eLabel, 18);
             group.Children.Add(eLabel);
         }
@@ -5563,7 +5981,15 @@ private void ApplyZoomToSchematicText(Panel panel)
         if (isButton)
         {
             var actuatorShift = pressed ? 3.0 : 0.0;
-            group.Children.Add(new Line { StartPoint = new Point(13 + actuatorShift, 28), EndPoint = new Point(43 + actuatorShift, 28), Stroke = stroke, StrokeThickness = 1.7, StrokeDashArray = new DoubleCollection { 3.0, 2.2 }, IsHitTestVisible = false });
+            group.Children.Add(new Line
+            {
+                StartPoint = new Point(26 + actuatorShift, 28),
+                EndPoint = new Point(43 + actuatorShift, 28),
+                Stroke = stroke,
+                StrokeThickness = 1.7,
+                StrokeDashArray = new DoubleCollection { 3.0, 3.0 },
+                IsHitTestVisible = false
+            });
             var eLabel = new TextBlock
             {
                 Text = "E",
@@ -5573,7 +5999,7 @@ private void ApplyZoomToSchematicText(Panel panel)
                 IsHitTestVisible = false,
                 Tag = "NoZoom"
             };
-            Canvas.SetLeft(eLabel, 3 + actuatorShift);
+            Canvas.SetLeft(eLabel, 15 + actuatorShift);
             Canvas.SetTop(eLabel, 18);
             group.Children.Add(eLabel);
         }
@@ -5585,7 +6011,16 @@ private void ApplyZoomToSchematicText(Panel panel)
 
     private static void AddTerminalNumber(Canvas group, string number, double x, double y, IBrush stroke)
     {
-        var label = new TextBlock { Text = number, Foreground = stroke, FontSize = 8, IsHitTestVisible = false };
+        var label = new TextBlock
+        {
+            Text = number,
+            Foreground = stroke,
+            FontSize = 11,
+            FontWeight = FontWeight.Bold,
+            RenderTransform = new ScaleTransform(1.15, 1.0), // делает цифры шире, убирая сплюснутость
+            RenderTransformOrigin = RelativePoint.TopLeft,
+            IsHitTestVisible = false
+        };
         Canvas.SetLeft(label, x);
         Canvas.SetTop(label, y);
         group.Children.Add(label);
@@ -5876,6 +6311,11 @@ private void UpdateSimulationButtons()
         UndoToolbarButton.Foreground = toolFg;
         RotateToolbarButton.Foreground = toolFg;
         DeleteToolbarButton.Foreground = toolFg;
+        ZoomInButton.Foreground = toolFg;
+        ZoomOutButton.Foreground = toolFg;
+        ZoomInButton.Foreground = toolFg;
+        ZoomOutButton.Foreground = toolFg;
+        UpdateHandToolAppearance();
         NewTabButton.Foreground = dark ? Brush("#CBD5E1") : Brush("#64748B");
         if (this.FindControl<Border>("TabsBarBorder") is { } tabsBar)
         {
@@ -5942,6 +6382,9 @@ private void UpdateSimulationButtons()
             AppLanguage.En => "EN",
             _ => "ES"
         };
+        ToolTip.SetTip(HandToolButton, L("Tool_Hand"));
+        ToolTip.SetTip(ZoomInButton, L("Tool_ZoomIn"));
+        ToolTip.SetTip(ZoomOutButton, L("Tool_ZoomOut"));
         ToolTip.SetTip(ThemeToggleButton, L("Menu_Theme"));
         ToolTip.SetTip(UndoToolbarButton, L("Tool_Undo"));
         ToolTip.SetTip(RotateToolbarButton, L("Tool_Rotate"));
@@ -6130,6 +6573,27 @@ private void UpdateSimulationButtons()
             }
 
             string fileNameOnly = System.IO.Path.GetFileName(fileName);
+            if (isCadSimu && _activeTab is not null)
+            {
+                PopulateCadImportUnconnectedTerminals(_activeTab);
+                if (_activeTab.CadImportUnconnectedTerminals.Count > 0)
+                {
+                    _activeTab.ImportWarningShownUtc = DateTime.UtcNow;
+                    _importWarningTimer.Start();
+                }
+                else
+                {
+                    _activeTab.ImportWarningShownUtc = null;
+                    _importWarningTimer.Stop();
+                }
+                Redraw();
+            }
+
+            StatusText.Text = isCadSimu
+                ? (_activeTab is { CadImportUnconnectedTerminals.Count: > 0 }
+                    ? L("Import_Cad_Unconnected", fileNameOnly, _activeTab.CadImportUnconnectedTerminals.Count)
+                    : $"{LocalizationService.Get("ImportedFromCadSimu")}: {fileNameOnly}")
+                : $"{LocalizationService.Get("Opened")}: {fileNameOnly}";
             StatusText.Text = isCadSimu
                 ? $"{LocalizationService.Get("ImportedFromCadSimu")}: {fileNameOnly}"
                 : $"{LocalizationService.Get("Opened")}: {fileNameOnly}";

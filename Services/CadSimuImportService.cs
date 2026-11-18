@@ -42,7 +42,7 @@ public sealed class CadSimuImportService
         [6011] = ComponentKind.Breaker3PN,
         [6014] = ComponentKind.Rcd1PN,
 
-        [2000] = ComponentKind.AuxContactNO,
+        [2000] = ComponentKind.Contactor2P,
         [2001] = ComponentKind.Contactor3P,
         [2002] = ComponentKind.Contactor4P,
         [2005] = ComponentKind.AuxContactNO,
@@ -58,7 +58,6 @@ public sealed class CadSimuImportService
         [7009] = ComponentKind.TimerOffContactNC,
         [7010] = ComponentKind.TimerOnOffContactNO_NC,
 
-
         [8000] = ComponentKind.PushButtonNO,
         [8001] = ComponentKind.PushButtonNC,
         [8002] = ComponentKind.PushButtonNO_NC,
@@ -73,7 +72,6 @@ public sealed class CadSimuImportService
         [9004] = ComponentKind.TimerOnDelay,
         [9005] = ComponentKind.TimerOffDelay,
         [9006] = ComponentKind.TimerOnOffDelay,
-        [9004] = ComponentKind.TimerOnDelay,
         [9008] = ComponentKind.Lamp,
         [9009] = ComponentKind.BlinkingLamp,
         [1000] = ComponentKind.AcMotor,
@@ -114,13 +112,29 @@ public sealed class CadSimuImportService
             if (!importedSymbols.Add((record.Code, tag, origin))) continue;
 
             var rotation = 0;
+            var fields = GetDataFields(record);
+
+            // Определяем ориентацию (угол поворота)
             if (ComponentTerminals.IsPowerMarker(kind))
             {
-                // По габаритам рамки (boxW, boxH) в полях 14..15 определяем горизонтальный или вертикальный вывод
                 if (TryReadIntPoint(record, 14, out var boxSize))
                     rotation = boxSize.X >= boxSize.Y ? 90 : 0;
                 else
                     rotation = 90;
+            }
+            else
+            {
+                var orientCode = 0;
+                if (fields.Length > 17 && int.TryParse(fields[17], NumberStyles.Integer, CultureInfo.InvariantCulture, out var o))
+                    orientCode = o;
+
+                rotation = orientCode switch
+                {
+                    1 => 90,
+                    2 => 180,
+                    3 => 270,
+                    _ => 0
+                };
             }
 
             var comp = new ComponentModel
@@ -139,7 +153,7 @@ public sealed class CadSimuImportService
         {
             if (!TryReadCableSegment(record, out var p1, out var p2)) continue;
 
-            if (record.Code == 4001 || p1 == p2)
+            if (record.Code is 4001 or 4002 || p1 == p2)
             {
                 explicitJunctions.Add(p1);
                 continue;
@@ -147,17 +161,16 @@ public sealed class CadSimuImportService
 
             var colorKey = record.Code switch
             {
-                4009 => "Blue",
-                4002 or 4010 => "GreenYellow",
-                4003 => "Red",
-                4004 => "Blue",
-                _ => "Brown" // 4000, 4019 и прочие фазные/цепи управления
+                4009 or 4004 => "Blue",          
+                4010 => "GreenYellow",           
+                4003 or 4018 => "Red",           
+                4019 => "Black",                 
+                _ => "Brown"                     
             };
-
             rawSegments.Add(new RawSegment(p1, p2, colorKey));
         }
 
-        // 3. Собираем все CAD-координаты для расчёта непересекающейся раскладки по сетке 10 px
+        // 3. Собираем все CAD-координаты для расчёта сетки 10 px
         var allCadX = new HashSet<int>();
         var allCadY = new HashSet<int>();
 
@@ -183,14 +196,15 @@ public sealed class CadSimuImportService
                 else
                 {
                     allCadX.Add(item.Origin.X + p * item.PoleStepCadX);
-                    allCadY.Add(item.Origin.Y);
+                    allCadY.Add(item.Origin.Y + p * item.PoleStepCadY);
                     if (item.CadHeightUnits > 0)
                         allCadY.Add(item.Origin.Y + item.CadHeightUnits);
+                    if (item.CadWidthUnits > 0)
+                        allCadX.Add(item.Origin.X + item.CadWidthUnits);
                 }
             }
         }
 
-        // 4. Ограничения на минимальные расстояния по X и Y с учётом размеров CircuitForge
         var xConstraints = new List<(int A, int B, double MinDist)>();
         var yConstraints = new List<(int A, int B, double MinDist)>();
         var polePitch = ComponentTerminals.PoleSpacing;
@@ -216,76 +230,27 @@ public sealed class CadSimuImportService
                 continue;
             }
 
-            // Полюса одного многополюсного элемента по горизонтали
             if (item.PoleCount > 1)
             {
                 var requiredSpan = item.Component.Kind is ComponentKind.ThermalRelayAuxNO_NC or ComponentKind.TimerOnOffContactNO_NC
                     ? 40.0
                     : (item.PoleCount - 1) * polePitch;
-                xConstraints.Add((item.Origin.X, item.Origin.X + (item.PoleCount - 1) * item.PoleStepCadX, requiredSpan));
+                if (item.PoleStepCadX > 0)
+                    xConstraints.Add((item.Origin.X, item.Origin.X + (item.PoleCount - 1) * item.PoleStepCadX, requiredSpan));
+                if (item.PoleStepCadY > 0)
+                    yConstraints.Add((item.Origin.Y, item.Origin.Y + (item.PoleCount - 1) * item.PoleStepCadY, requiredSpan));
             }
 
-            // Высота вертикального элемента в CircuitForge = 60 px (от -30 до +30)
             if (item.CadHeightUnits > 0)
                 yConstraints.Add((item.Origin.Y, item.Origin.Y + item.CadHeightUnits, 60.0));
-        }
-
-        // Зазоры между соседними компонентами, чтобы они не перекрывали друг друга
-        for (var i = 0; i < importedItems.Count; i++)
-        {
-            var a = importedItems[i];
-            for (var j = i + 1; j < importedItems.Count; j++)
-            {
-                var b = importedItems[j];
-
-                var aMinX = a.Origin.X;
-                var aMaxX = a.Origin.X + Math.Max(0, a.PoleCount - 1) * (a.Component.Rotation == 0 && ComponentTerminals.IsPowerMarker(a.Component.Kind) ? 0 : a.PoleStepCadX);
-                var bMinX = b.Origin.X;
-                var bMaxX = b.Origin.X + Math.Max(0, b.PoleCount - 1) * (b.Component.Rotation == 0 && ComponentTerminals.IsPowerMarker(b.Component.Kind) ? 0 : b.PoleStepCadX);
-
-                var aMinY = ComponentTerminals.IsPowerMarker(a.Component.Kind) && a.Component.Rotation == 0
-                    ? a.Origin.Y - Math.Max(0, a.PoleCount - 1) * a.PoleStepCadY
-                    : a.Origin.Y;
-                var aMaxY = a.Origin.Y + a.CadHeightUnits;
-
-                var bMinY = ComponentTerminals.IsPowerMarker(b.Component.Kind) && b.Component.Rotation == 0
-                    ? b.Origin.Y - Math.Max(0, b.PoleCount - 1) * b.PoleStepCadY
-                    : b.Origin.Y;
-                var bMaxY = b.Origin.Y + b.CadHeightUnits;
-
-                var yOverlap = !(aMaxY < bMinY || bMaxY < aMinY);
-                var xOverlap = !(aMaxX < bMinX || bMaxX < aMinX);
-
-                // Если два элемента пересекаются по Y-диапазону (стоят рядом по горизонтали)
-                if (yOverlap && aMaxX < bMinX)
-                {
-                    var minGap = GetHorizontalHalfExtent(a.Component.Kind) + GetHorizontalHalfExtent(b.Component.Kind) + 20.0;
-                    xConstraints.Add((aMaxX, bMinX, minGap));
-                }
-                else if (yOverlap && bMaxX < aMinX)
-                {
-                    var minGap = GetHorizontalHalfExtent(a.Component.Kind) + GetHorizontalHalfExtent(b.Component.Kind) + 20.0;
-                    xConstraints.Add((bMaxX, aMinX, minGap));
-                }
-
-                // Если два элемента пересекаются по X-диапазону (стоят друг под другом)
-                if (xOverlap && aMaxY < bMinY)
-                {
-                    var extraMotorHeight = a.CadHeightUnits == 0 && !ComponentTerminals.IsPowerMarker(a.Component.Kind) ? 60.0 : 0.0;
-                    yConstraints.Add((aMaxY, bMinY, 20.0 + extraMotorHeight));
-                }
-                else if (xOverlap && bMaxY < aMinY)
-                {
-                    var extraMotorHeight = b.CadHeightUnits == 0 && !ComponentTerminals.IsPowerMarker(b.Component.Kind) ? 60.0 : 0.0;
-                    yConstraints.Add((bMaxY, aMinY, 20.0 + extraMotorHeight));
-                }
-            }
+            if (item.CadWidthUnits > 0)
+                xConstraints.Add((item.Origin.X, item.Origin.X + item.CadWidthUnits, 60.0));
         }
 
         var mapX = ComputeAxisPositions(allCadX, xConstraints, 80.0);
         var mapY = ComputeAxisPositions(allCadY, yConstraints, 80.0);
 
-        // 5. Выставляем координаты компонентов и регистрируем их CADe-пины
+        // 4. Позиционирование компонентов и регистрация выводов
         var components = new List<ComponentModel>();
         var cadPinMap = new Dictionary<CadPoint, (Guid ComponentId, string TerminalId)>();
 
@@ -311,8 +276,20 @@ public sealed class CadSimuImportService
                     comp.Y = mapY[item.Origin.Y] - 40.0;
                 }
             }
+            else if (comp.Rotation is 90 or 270)
+            {
+                // Горизонтальный элемент
+                var xLeft = item.Origin.X;
+                var xRight = item.Origin.X + (item.CadWidthUnits > 0 ? item.CadWidthUnits : 0);
+                comp.X = Snap((mapX[xLeft] + mapX[xRight]) / 2.0);
+
+                var yTop = item.Origin.Y;
+                var yBot = item.Origin.Y + Math.Max(0, item.PoleCount - 1) * item.PoleStepCadY;
+                comp.Y = Snap((mapY[yTop] + mapY[yBot]) / 2.0);
+            }
             else
             {
+                // Вертикальный элемент
                 var xLeft = item.Origin.X;
                 var xRight = item.Origin.X + Math.Max(0, item.PoleCount - 1) * item.PoleStepCadX;
                 comp.X = Snap((mapX[xLeft] + mapX[xRight]) / 2.0);
@@ -320,7 +297,7 @@ public sealed class CadSimuImportService
                 if (item.CadHeightUnits > 0)
                     comp.Y = Snap((mapY[item.Origin.Y] + mapY[item.Origin.Y + item.CadHeightUnits]) / 2.0);
                 else
-                    comp.Y = mapY[item.Origin.Y] + 30.0; // например, AcMotor (верхние выводы -30)
+                    comp.Y = mapY[item.Origin.Y] + 30.0;
             }
 
             components.Add(comp);
@@ -342,7 +319,7 @@ public sealed class CadSimuImportService
             cadPinMap[pt] = (junc.Id, "J");
         }
 
-        // 6. Разрезание проводов по Т-перекрёсткам и трассировка
+        // 5. Прокладка проводов
         var wires = new List<WireModel>();
         BuildWiresFromCadGraph(rawSegments, cadPinMap, components, wires, mapX, mapY);
 
@@ -353,11 +330,11 @@ public sealed class CadSimuImportService
             Wires = wires
         };
 
-        // 7. Список неподдерживаемых элементов (исключая провода, рамки, текст, штамп 20000)
         var knownNonComponentCodes = new HashSet<int>
         {
-            2, 8, 4000, 4001, 4002, 4003, 4004, 4005, 4006, 4007, 4008, 4009, 4010, 4019, 20000,
-            10000, 10001, 10002, 11000, 11001, 12000, 12001, 13000, 14000
+            2, 8, 4000, 4001, 4002, 4003, 4004, 4005, 4006, 4007, 4008, 4009, 4010,
+            4011, 4012, 4013, 4014, 4015, 4016, 4017, 4018, 4019,
+            20000, 10000, 10001, 10002, 11000, 11001, 12000, 12001, 13000, 14000
         };
 
         var missing = records
@@ -386,34 +363,97 @@ public sealed class CadSimuImportService
                 : (Math.Max(0, count - 1) * 6, 0, count, 6, 0);
         }
 
+        var isHorizontal = rotation is 90 or 270;
+
         return code switch
         {
-            6005 => (6, 18, 2, 6, 0),
-            6006 => (18, 18, 4, 6, 0),
-            6007 => (12, 12, 3, 6, 0),
-            6008 or 6014 => (6, 21, 2, 6, 0),
-            6009 => (12, 21, 3, 6, 0),
-            6011 => (18, 21, 4, 6, 0),
-            6000 or 6010 => (0, 21, 1, 0, 0),
-            2001 => (12, 12, 3, 6, 0),
-            2002 => (18, 12, 4, 6, 0),
-            8018 or 7006 or 7010 => (9, 12, 2, 9, 0),
-            8002 or 2007 => (6, 12, 2, 6, 0),
+            2000 => isHorizontal ? (12, 6, 2, 0, 6) : (6, 12, 2, 6, 0),
+            2001 => isHorizontal ? (12, 12, 3, 0, 6) : (12, 12, 3, 6, 0),
+            2002 => isHorizontal ? (12, 18, 4, 0, 6) : (18, 12, 4, 6, 0),
+            2005 or 2006 => isHorizontal ? (12, 6, 2, 0, 6) : (6, 12, 2, 6, 0),
+            6005 => isHorizontal ? (18, 6, 2, 0, 6) : (6, 18, 2, 6, 0),
+            6006 => isHorizontal ? (18, 18, 4, 0, 6) : (18, 18, 4, 6, 0),
+            6007 => isHorizontal ? (12, 12, 3, 0, 6) : (12, 12, 3, 6, 0),
+            6008 or 6014 => isHorizontal ? (21, 6, 2, 0, 6) : (6, 21, 2, 6, 0),
+            6009 => isHorizontal ? (21, 12, 3, 0, 6) : (12, 21, 3, 6, 0),
+            6011 => isHorizontal ? (21, 18, 4, 0, 6) : (18, 21, 4, 6, 0),
+            6000 or 6010 => isHorizontal ? (21, 0, 1, 0, 0) : (0, 21, 1, 0, 0),
+            8018 or 7006 or 7010 => isHorizontal ? (12, 9, 2, 0, 9) : (9, 12, 2, 9, 0),
+            8002 or 2007 => isHorizontal ? (12, 6, 2, 0, 6) : (6, 12, 2, 6, 0),
             1000 => (12, 0, 3, 6, 0),
             1001 => (6, 0, 2, 6, 0),
-            _ => (0, 12, 1, 0, 0)
+            _ => isHorizontal ? (12, 0, 1, 0, 0) : (0, 12, 1, 0, 0)
         };
     }
 
-    private static double GetHorizontalHalfExtent(ComponentKind kind) => kind switch
+    private static void RegisterComponentTerminals(
+        Dictionary<CadPoint, (Guid ComponentId, string TerminalId)> map,
+        ImportedItem item,
+        IReadOnlyList<TerminalDefinition> allTerms)
     {
-        ComponentKind.Breaker1PN or ComponentKind.Breaker2P or ComponentKind.Rcd1PN or ComponentKind.Contactor2P => 55,
-        ComponentKind.Breaker3P or ComponentKind.Contactor3P or ComponentKind.ThermalRelay or ComponentKind.AcMotor => 65,
-        ComponentKind.Breaker3PN or ComponentKind.Rcd3PN or ComponentKind.Contactor4P => 75,
-        ComponentKind.ThermalRelayAuxNO_NC or ComponentKind.PushButtonNO_NC or ComponentKind.AuxContactNO_NC => 55,
-        ComponentKind.ThermalRelayAuxNO_NC or ComponentKind.TimerOnOffContactNO_NC or ComponentKind.PushButtonNO_NC or ComponentKind.AuxContactNO_NC => 55,
-        _ => 45
-    };
+        if (allTerms.Count == 0) return;
+        var comp = item.Component;
+        var x = item.Origin.X;
+        var y = item.Origin.Y;
+
+        if (ComponentTerminals.IsPowerMarker(comp.Kind))
+        {
+            if (comp.Rotation == 0)
+            {
+                if (comp.Kind == ComponentKind.PowerThreePhaseNeutral)
+                {
+                    map[new CadPoint(x, y - 18)] = (comp.Id, "N");
+                    map[new CadPoint(x, y - 12)] = (comp.Id, "L3");
+                    map[new CadPoint(x, y - 6)] = (comp.Id, "L2");
+                    map[new CadPoint(x, y)] = (comp.Id, "L1");
+                }
+                else
+                {
+                    var sortedY = allTerms.OrderBy(t => t.OffsetY).ToList();
+                    for (var i = 0; i < sortedY.Count; i++)
+                        map[new CadPoint(x, y - (sortedY.Count - 1 - i) * item.PoleStepCadY)] = (comp.Id, sortedY[i].Id);
+                }
+            }
+            else
+            {
+                var rad = comp.Rotation * Math.PI / 180.0;
+                var sortedX = allTerms.OrderBy(t => t.OffsetX * Math.Cos(rad) - t.OffsetY * Math.Sin(rad)).ToList();
+                for (var i = 0; i < sortedX.Count; i++)
+                    map[new CadPoint(x + i * item.PoleStepCadX, y)] = (comp.Id, sortedX[i].Id);
+            }
+            return;
+        }
+
+        if (comp.Rotation is 90 or 270)
+        {
+            // Горизонтальный элемент: входные клеммы слева (X), выходные справа (X + CadW)
+            var inTerms = allTerms.Where(t => t.OffsetY <= 0).OrderBy(t => t.OffsetX).ToList();
+            var outTerms = allTerms.Where(t => t.OffsetY > 0).OrderBy(t => t.OffsetX).ToList();
+
+            for (var i = 0; i < inTerms.Count; i++)
+                map[new CadPoint(x, y + i * item.PoleStepCadY)] = (comp.Id, inTerms[i].Id);
+
+            if (item.CadWidthUnits > 0)
+            {
+                for (var i = 0; i < outTerms.Count; i++)
+                    map[new CadPoint(x + item.CadWidthUnits, y + i * item.PoleStepCadY)] = (comp.Id, outTerms[i].Id);
+            }
+            return;
+        }
+
+        // Вертикальный элемент
+        var topTerms = allTerms.Where(t => t.OffsetY <= 0).OrderBy(t => t.OffsetX).ToList();
+        var bottomTerms = allTerms.Where(t => t.OffsetY > 0).OrderBy(t => t.OffsetX).ToList();
+
+        for (var i = 0; i < topTerms.Count; i++)
+            map[new CadPoint(x + i * item.PoleStepCadX, y)] = (comp.Id, topTerms[i].Id);
+
+        if (item.CadHeightUnits > 0)
+        {
+            for (var i = 0; i < bottomTerms.Count; i++)
+                map[new CadPoint(x + i * item.PoleStepCadX, y + item.CadHeightUnits)] = (comp.Id, bottomTerms[i].Id);
+        }
+    }
 
     private static Dictionary<int, double> ComputeAxisPositions(
         IReadOnlyCollection<int> rawCoords,
@@ -446,7 +486,6 @@ public sealed class CadSimuImportService
         for (var i = 1; i < sorted.Count; i++)
         {
             var delta = sorted[i] - sorted[i - 1];
-            // Базовый масштаб: 3 ед. CADe_SIMU = 10 px (1 клетка сетки)
             var baseStep = Math.Max(10.0, Math.Round((delta * 10.0 / 3.0) / 10.0) * 10.0);
             var next = coords[i - 1] + baseStep;
 
@@ -462,58 +501,6 @@ public sealed class CadSimuImportService
         return pos;
     }
 
-    private static void RegisterComponentTerminals(
-        Dictionary<CadPoint, (Guid ComponentId, string TerminalId)> map,
-        ImportedItem item,
-        IReadOnlyList<TerminalDefinition> allTerms)
-    {
-        if (allTerms.Count == 0) return;
-        var comp = item.Component;
-        var x = item.Origin.X;
-        var y = item.Origin.Y;
-
-        if (ComponentTerminals.IsPowerMarker(comp.Kind))
-        {
-            if (comp.Rotation == 0)
-            {
-                // Горизонтальный маркер (3006 и др.): в CADe_SIMU сверху N, ниже L3, L2, L1
-                if (comp.Kind == ComponentKind.PowerThreePhaseNeutral)
-                {
-                    map[new CadPoint(x, y - 18)] = (comp.Id, "N");
-                    map[new CadPoint(x, y - 12)] = (comp.Id, "L3");
-                    map[new CadPoint(x, y - 6)] = (comp.Id, "L2");
-                    map[new CadPoint(x, y)] = (comp.Id, "L1");
-                }
-                else
-                {
-                    var sortedY = allTerms.OrderBy(t => t.OffsetY).ToList();
-                    for (var i = 0; i < sortedY.Count; i++)
-                        map[new CadPoint(x, y - (sortedY.Count - 1 - i) * item.PoleStepCadY)] = (comp.Id, sortedY[i].Id);
-                }
-            }
-            else
-            {
-                var rad = comp.Rotation * Math.PI / 180.0;
-                var sortedX = allTerms.OrderBy(t => t.OffsetX * Math.Cos(rad) - t.OffsetY * Math.Sin(rad)).ToList();
-                for (var i = 0; i < sortedX.Count; i++)
-                    map[new CadPoint(x + i * item.PoleStepCadX, y)] = (comp.Id, sortedX[i].Id);
-            }
-            return;
-        }
-
-        var topTerms = allTerms.Where(t => t.OffsetY <= 0).OrderBy(t => t.OffsetX).ToList();
-        var bottomTerms = allTerms.Where(t => t.OffsetY > 0).OrderBy(t => t.OffsetX).ToList();
-
-        for (var i = 0; i < topTerms.Count; i++)
-            map[new CadPoint(x + i * item.PoleStepCadX, y)] = (comp.Id, topTerms[i].Id);
-
-        if (item.CadHeightUnits > 0)
-        {
-            for (var i = 0; i < bottomTerms.Count; i++)
-                map[new CadPoint(x + i * item.PoleStepCadX, y + item.CadHeightUnits)] = (comp.Id, bottomTerms[i].Id);
-        }
-    }
-
     private static void BuildWiresFromCadGraph(
         List<RawSegment> rawSegments,
         Dictionary<CadPoint, (Guid ComponentId, string TerminalId)> cadPinMap,
@@ -522,7 +509,6 @@ public sealed class CadSimuImportService
         Dictionary<int, double> mapX,
         Dictionary<int, double> mapY)
     {
-        // Разрезаем длинные отрезки во всех точках стыка (Т-отводы, клеммы, 4001)
         var splitPoints = new HashSet<CadPoint>(cadPinMap.Keys);
         foreach (var s in rawSegments)
         {
@@ -580,7 +566,6 @@ public sealed class CadSimuImportService
             lb.Add((s.Start, s.ColorKey));
         }
 
-        // Автоматические узлы на развилках >= 3 проводов
         foreach (var (pt, neighbors) in graph)
         {
             if (neighbors.Count >= 3 && !cadPinMap.ContainsKey(pt))
@@ -633,17 +618,15 @@ public sealed class CadSimuImportService
                 var endWorld = GetTerminalWorldPos(compById[endTerm.ComponentId], endTerm.TerminalId);
 
                 var waypoints = new List<WireWaypoint>();
-                var startMapped = new WireWaypoint { X = mapX[startPt.X], Y = mapY[startPt.Y] };
-                if (Math.Abs(startMapped.X - startWorld.X) > 0.5 || Math.Abs(startMapped.Y - startWorld.Y) > 0.5)
-                    waypoints.Add(startMapped);
+             foreach (var wp in rawWaypoints)
+                 waypoints.Add(new WireWaypoint { X = mapX[wp.X], Y = mapY[wp.Y] });
 
-                foreach (var wp in rawWaypoints)
-                    waypoints.Add(new WireWaypoint { X = mapX[wp.X], Y = mapY[wp.Y] });
-
-                var endMapped = new WireWaypoint { X = mapX[current.X], Y = mapY[current.Y] };
-                if (Math.Abs(endMapped.X - endWorld.X) > 0.5 || Math.Abs(endMapped.Y - endWorld.Y) > 0.5)
-                    waypoints.Add(endMapped);
-
+             for (var i = waypoints.Count - 1; i > 0; i--)
+             {
+                 if (Math.Abs(waypoints[i].X - waypoints[i - 1].X) < 0.5 &&
+                     Math.Abs(waypoints[i].Y - waypoints[i - 1].Y) < 0.5)
+                     waypoints.RemoveAt(i);
+             }
                 resultWires.Add(new WireModel
                 {
                     StartComponentId = startTerm.ComponentId,
@@ -723,54 +706,53 @@ public sealed class CadSimuImportService
         return false;
     }
 
-private static List<CadRecord> ParseRecords(string text)
-{
-    var records = new List<CadRecord>();
-    List<string>? current = null;
-    int id = 0, code = 0;
-
-    foreach (var part in text.Split('#'))
+    private static List<CadRecord> ParseRecords(string text)
     {
-        var trimmed = part.Trim();
-        if (trimmed.StartsWith("$$$", StringComparison.Ordinal))
-            break;
+        var records = new List<CadRecord>();
+        List<string>? current = null;
+        int id = 0, code = 0;
 
-        var fields = trimmed.Split('*', StringSplitOptions.RemoveEmptyEntries);
-
-        // Заголовок записи в CADe_SIMU — это ровно 2 числа: *<id>*<code> (где code > 0)
-        if (fields.Length == 2 &&
-            int.TryParse(fields[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var nextId) &&
-            int.TryParse(fields[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var nextCode) &&
-            nextCode > 0)
+        foreach (var part in text.Split('#'))
         {
-            if (current is not null) records.Add(new CadRecord(id, code, current.ToArray()));
-            id = nextId;
-            code = nextCode;
-            current = new List<string> { trimmed };
-            continue;
-        }
+            var trimmed = part.Trim();
+            if (trimmed.StartsWith("$$$", StringComparison.Ordinal))
+                break;
 
-        // У текстовых меток (код 8) следующий заголовок приклеен после текста: "ТЕКСТ*49*6008"
-        if (current is not null && code == 8)
-        {
-            var rawTokens = trimmed.Split('*');
-            if (rawTokens.Length >= 3 &&
-                int.TryParse(rawTokens[^2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var capNextId) &&
-                int.TryParse(rawTokens[^1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var capNextCode) &&
-                capNextCode > 0)
+            var fields = trimmed.Split('*', StringSplitOptions.RemoveEmptyEntries);
+
+            if (fields.Length == 2 &&
+                int.TryParse(fields[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var nextId) &&
+                int.TryParse(fields[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var nextCode) &&
+                nextCode > 0)
             {
-                current.Add(string.Join("*", rawTokens[..^2]));
-                records.Add(new CadRecord(id, code, current.ToArray()));
-                id = capNextId;
-                code = capNextCode;
-                current = new List<string> { $"{capNextId}*{capNextCode}" };
+                if (current is not null) records.Add(new CadRecord(id, code, current.ToArray()));
+                id = nextId;
+                code = nextCode;
+                current = new List<string> { trimmed };
                 continue;
             }
+
+            if (current is not null && code == 8)
+            {
+                var rawTokens = trimmed.Split('*');
+                if (rawTokens.Length >= 3 &&
+                    int.TryParse(rawTokens[^2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var capNextId) &&
+                    int.TryParse(rawTokens[^1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var capNextCode) &&
+                    capNextCode > 0)
+                {
+                    current.Add(string.Join("*", rawTokens[..^2]));
+                    records.Add(new CadRecord(id, code, current.ToArray()));
+                    id = capNextId;
+                    code = capNextCode;
+                    current = new List<string> { $"{capNextId}*{capNextCode}" };
+                    continue;
+                }
+            }
+
+            current?.Add(trimmed);
         }
 
-        current?.Add(trimmed);
+        if (current is not null) records.Add(new CadRecord(id, code, current.ToArray()));
+        return records;
     }
-
-    if (current is not null) records.Add(new CadRecord(id, code, current.ToArray()));
-    return records;
-}}
+}

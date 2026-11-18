@@ -25,6 +25,11 @@ public static class LocalizationService
 
     private static readonly Dictionary<string, (string Ru, string En, string Es)> Strings = new()
     {
+        ["Import_Cad_Unconnected"] = ("Импорт из CADe SIMU: {0} · неподключённых клемм: {1} (отмечены !)", "CADe SIMU import: {0} · unconnected terminals: {1} (marked with !)",
+        "Importado de CADe SIMU: {0} · bornes sin conectar: {1} (marcados con !)"),
+        ["Tool_Hand"] = ("Перемещать поле (Space / H)", "Pan workspace (Space / H)", "Mover área (Espacio / H)"),
+        ["Tool_ZoomIn"] = ("Приблизить", "Zoom In", "Acercar"),
+        ["Tool_ZoomOut"] = ("Отдалить", "Zoom Out", "Alejar"),
         ["Dialog_Save_Title"] = ("Несохранённые изменения", "Unsaved Changes", "Cambios sin guardar"),
         ["Dialog_Save_Message"] = ("Сохранить изменения в «{0}»?", "Save changes to \"{0}\"?", "¿Guardar los cambios en \"{0}\"?"),
         ["Clipboard_Cut"] = ("Вырезано элементов: {0}.", "Cut {0} element(s).", "Cortado(s) {0} elemento(s)."),
